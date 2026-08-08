@@ -1,0 +1,544 @@
+<!doctype html>
+<!-- Phaser prototype -->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>찰싹 레이스 프로토타입</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #211d2b; overflow: hidden; }
+    body { display: grid; place-items: center; font-family: system-ui, sans-serif; }
+    #game { width: min(100vw, 430px); height: 100dvh; max-height: 900px; }
+    #game canvas { display: block; width: 100% !important; height: 100% !important; }
+    #creator { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: #211d2b; }
+    .creator-card { width: min(92vw, 390px); padding: 22px; border-radius: 24px; background: #fff8ec; color: #3b3241; text-align: center; }
+    .creator-card h1 { margin: 0 0 6px; }
+    .creator-card p { margin: 0 0 14px; font-size: 14px; }
+    .photo-preview { display: grid; place-items: center; width: 180px; height: 180px; margin: auto; border: 3px dashed #bca9c2; border-radius: 50%; background: #fff; overflow: hidden; }
+    .photo-preview canvas { width: 180px; height: 180px; }
+    #photo-zoom { width: 180px; }
+    #player-name { width: 180px; margin: 0 0 10px; padding: 10px 14px; border: 2px solid #d8cadd; border-radius: 999px; font: inherit; text-align: center; background: #fff; }
+    .photo-tools { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 14px 0; }
+    .photo-tools button, #start-game { border: 0; border-radius: 999px; padding: 10px 16px; font-weight: 800; cursor: pointer; }
+    #choose-photo { background: #eadbea; color: #3b3241; }
+    #start-game { width: 100%; background: #6f5c75; color: #fff; font-size: 17px; }
+  </style>
+</head>
+<body>
+  <section id="creator" aria-label="얼굴 사진 선택">
+    <div class="creator-card">
+      <h1 id="creator-title">플레이어 1 얼굴 사진 (1/4)</h1>
+      <p>사진은 선택 사항이에요. 건너뛰면 기본 얼굴이 들어가요.<br />선택한 사진은 이 기기 브라우저에서만 처리됩니다.</p>
+      <input id="player-name" maxlength="8" value="플레이어 1" aria-label="캐릭터 이름" />
+      <div class="photo-preview"><canvas id="photo-preview" width="180" height="180"></canvas></div>
+      <input id="photo-input" type="file" accept="image/*" capture="user" hidden />
+      <div class="photo-tools"><button id="choose-photo" type="button">사진 고르기</button></div>
+      <input id="photo-zoom" type="range" min="1" max="3" value="1" step="0.01" aria-label="사진 확대" />
+      <p>사진을 드래그해 얼굴 위치를 맞춰주세요.</p>
+      <button id="start-game" type="button">다음 캐릭터</button>
+    </div>
+  </section>
+  <main id="game" aria-label="찰싹 레이스 게임"></main>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@4.2.0/dist/phaser.js"></script>
+  <script>
+    const WIDTH = 390;
+    const HEIGHT = 844;
+    const FLOOR_Y = 1510;
+    const START_LINE_Y = 360;
+    const BASE_SCALE = 0.8;
+    const NAMES = ['플레이어 1', '플레이어 2', '플레이어 3', '플레이어 4'];
+    const COLORS = [0xdc55f6, 0xff8b32, 0x63df87, 0x27c8ef];
+
+    let racers = [];
+    let started = false;
+    let finished = false;
+    let finishCount = 0;
+    let guide;
+    const photos = [];
+    let photoIndex = 0;
+    let selectedPhoto;
+    let draggingPhoto = false;
+    let dragPoint;
+    const photoInput = document.querySelector('#photo-input');
+    const nameInput = document.querySelector('#player-name');
+    const previewCanvas = document.querySelector('#photo-preview');
+    const previewContext = previewCanvas.getContext('2d');
+
+    function drawFace(context, photo, size) {
+      const { image, zoom = 1, x = 0, y = 0, baseSize = size } = photo;
+      const scale = Math.max(size / image.width, size / image.height);
+      const width = image.width * scale * zoom;
+      const height = image.height * scale * zoom;
+      context.clearRect(0, 0, size, size);
+      context.save();
+      context.beginPath();
+      context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+      context.clip();
+      context.drawImage(image, (size - width) / 2 + x * size / baseSize, (size - height) / 2 + y * size / baseSize, width, height);
+      context.restore();
+    }
+
+    function drawDefaultFace(context, size) {
+      context.clearRect(0, 0, size, size);
+      context.fillStyle = '#fff5df';
+      context.beginPath(); context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2); context.fill();
+      context.fillStyle = '#403248';
+      context.beginPath(); context.ellipse(size * 0.36, size * 0.44, size * 0.06, size * 0.08, 0, 0, Math.PI * 2); context.fill();
+      context.beginPath(); context.ellipse(size * 0.64, size * 0.44, size * 0.06, size * 0.08, 0, 0, Math.PI * 2); context.fill();
+      context.fillStyle = '#f6a5a5';
+      context.beginPath(); context.arc(size * 0.25, size * 0.61, size * 0.1, 0, Math.PI * 2); context.fill();
+      context.beginPath(); context.arc(size * 0.75, size * 0.61, size * 0.1, 0, Math.PI * 2); context.fill();
+      context.strokeStyle = '#403248'; context.lineWidth = size * 0.05; context.lineCap = 'round';
+      context.beginPath(); context.arc(size / 2, size * 0.55, size * 0.13, 0.1, Math.PI - 0.1); context.stroke();
+    }
+
+    drawDefaultFace(previewContext, previewCanvas.width);
+
+    document.querySelector('#choose-photo').addEventListener('click', () => photoInput.click());
+    document.querySelector('#photo-zoom').addEventListener('input', (event) => {
+      if (!selectedPhoto) return;
+      selectedPhoto.zoom = Number(event.target.value);
+      drawFace(previewContext, selectedPhoto, previewCanvas.width);
+    });
+    previewCanvas.addEventListener('pointerdown', (event) => {
+      if (!selectedPhoto) return;
+      draggingPhoto = true;
+      dragPoint = { x: event.clientX, y: event.clientY };
+      previewCanvas.setPointerCapture(event.pointerId);
+    });
+    previewCanvas.addEventListener('pointermove', (event) => {
+      if (!draggingPhoto) return;
+      const ratio = previewCanvas.width / previewCanvas.getBoundingClientRect().width;
+      selectedPhoto.x += (event.clientX - dragPoint.x) * ratio;
+      selectedPhoto.y += (event.clientY - dragPoint.y) * ratio;
+      dragPoint = { x: event.clientX, y: event.clientY };
+      drawFace(previewContext, selectedPhoto, previewCanvas.width);
+    });
+    previewCanvas.addEventListener('pointerup', () => draggingPhoto = false);
+    previewCanvas.addEventListener('pointercancel', () => draggingPhoto = false);
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => {
+          selectedPhoto = { image, zoom: 1, x: 0, y: 0, baseSize: previewCanvas.width };
+          document.querySelector('#photo-zoom').value = '1';
+          drawFace(previewContext, selectedPhoto, previewCanvas.width);
+        };
+        image.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    document.querySelector('#start-game').addEventListener('click', () => {
+      NAMES[photoIndex] = nameInput.value.trim() || NAMES[photoIndex];
+      photos.push(selectedPhoto);
+      photoIndex += 1;
+      selectedPhoto = undefined;
+      photoInput.value = '';
+      document.querySelector('#photo-zoom').value = '1';
+      drawDefaultFace(previewContext, previewCanvas.width);
+
+      if (photoIndex < NAMES.length) {
+        document.querySelector('#creator-title').textContent = `${NAMES[photoIndex]} 얼굴 사진 (${photoIndex + 1}/4)`;
+        nameInput.value = NAMES[photoIndex];
+        if (photoIndex === NAMES.length - 1) document.querySelector('#start-game').textContent = '레이스 시작';
+      } else {
+        document.querySelector('#creator').remove();
+        launchGame();
+      }
+    });
+
+    function create() {
+      photos.forEach((photo, index) => createFaceTexture.call(this, photo, index));
+      drawRoom.call(this);
+
+      racers = NAMES.map((name, index) => {
+        const x = 58 + index * 91;
+        const sprite = createSlime.call(this, x, 150, COLORS[index], index);
+
+        return {
+          sprite,
+          limbs: sprite.list.slice(0, 4),
+          laneX: x,
+          startY: 150,
+          name,
+          label: this.add.text(x, 89, name, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '15px', fontStyle: '700', color: '#3b3241'
+          }).setOrigin(0.5),
+          timer: null,
+          tween: null,
+          limbTweens: [],
+          direction: index % 2 ? 1 : -1,
+          anchorIndex: index % 2,
+          posePhase: index % 2 === 0,
+          stickyWith: null,
+          stickyUntil: 0,
+          done: false
+        };
+      });
+
+      racers.forEach((racer) => {
+        racer.sprite.setSize(62, 94).setInteractive({ useHandCursor: true });
+        this.input.setDraggable(racer.sprite);
+      });
+      this.input.on('drag', (_pointer, sprite, dragX, dragY) => {
+        if (started || finished) return;
+        const racer = racers.find((player) => player.sprite === sprite);
+        if (!racer) return;
+        racer.laneX = Phaser.Math.Clamp(dragX, 34, WIDTH - 34);
+        racer.startY = Phaser.Math.Clamp(dragY, 105, START_LINE_Y - 48);
+        racer.sprite.setPosition(racer.laneX, racer.startY);
+        racer.label.setPosition(racer.laneX, racer.startY - 56);
+      });
+
+      guide = this.add.text(WIDTH / 2, 475, '출발선 위 공간에서 캐릭터를 배치한 뒤\n여기를 눌러 찰싹!', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '27px', fontStyle: '800', color: '#3b3241',
+        backgroundColor: '#fff4b8', padding: { x: 18, y: 12 }
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(20).setInteractive({ useHandCursor: true });
+
+      this.cameras.main.setBounds(0, 0, WIDTH, FLOOR_Y + 89);
+
+      guide.on('pointerdown', () => {
+        if (!started || finished) startRace.call(this);
+      });
+    }
+
+    function startRace() {
+      racers.forEach((racer, index) => {
+        racer.timer?.remove(false);
+        racer.tween?.stop();
+        racer.limbTweens.forEach((tween) => tween.stop());
+        racer.limbs.forEach((limb) => limb.setAngle(limb.homeAngle));
+        racer.limbs.forEach((limb) => {
+          limb.setScale(1);
+          limb.joint.setAngle(limb.joint.homeAngle).setScale(1);
+          limb.pad.setScale(1);
+        });
+        racer.sprite.chest.setPosition(0, -2).setAngle(0).setScale(1);
+        racer.sprite.head.setPosition(0, -22).setAngle(0).setScale(1);
+        this.tweens.killTweensOf(racer.sprite);
+        racer.done = false;
+        racer.sprite.setPosition(racer.laneX, racer.startY);
+        racer.sprite.setAngle(index % 2 ? 8 : -8);
+        racer.sprite.setScale(BASE_SCALE);
+        racer.anchorIndex = index % 2;
+        racer.posePhase = index % 2 === 0;
+        racer.stickyWith = null;
+        racer.stickyUntil = 0;
+        this.time.delayedCall(index * 110, () => stick.call(this, racer));
+      });
+
+      started = true;
+      finished = false;
+      finishCount = 0;
+      guide.setVisible(false).disableInteractive();
+    }
+
+    function flip(racer) {
+      if (racer.done || finished) return;
+      const startY = racer.sprite.y;
+      const startAngle = racer.sprite.angle;
+      const drop = Phaser.Math.Between(62, 92);
+      const duration = Phaser.Math.Between(650, 1050);
+      let landingY = startY + drop;
+      const turn = Phaser.Math.Between(120, 220);
+      const progress = { value: 0 };
+      const anchor = racer.limbs[racer.anchorIndex];
+      const anchorPoint = limbEnd(anchor);
+      const fixedPoint = rotatePoint(anchorPoint, startAngle);
+      fixedPoint.x += racer.sprite.x;
+      fixedPoint.y += racer.sprite.y;
+      let nextAnchor = Math.random() < 0.75 ? 3 - racer.anchorIndex : Phaser.Math.Between(0, 3);
+      if (nextAnchor === racer.anchorIndex) nextAnchor = 3 - racer.anchorIndex;
+
+      if (Math.random() < 0.2) racer.direction *= -1;
+      racer.posePhase = !racer.posePhase;
+      animateLimbs.call(this, racer, racer.anchorIndex);
+
+      racer.tween = this.tweens.add({
+        targets: progress,
+        value: 1,
+        duration,
+        ease: 'Cubic.easeInOut',
+        onUpdate: () => {
+          const angle = startAngle + racer.direction * turn * progress.value;
+          const rotatedAnchor = rotatePoint(anchorPoint, angle);
+          const pivotX = fixedPoint.x - rotatedAnchor.x;
+          const pivotY = fixedPoint.y + progress.value * 7 - rotatedAnchor.y;
+          const release = Phaser.Math.Clamp((progress.value - 0.62) / 0.38, 0, 1);
+          const liveBoost = catchUpAmount(racer);
+          landingY = startY + drop * (1 + liveBoost);
+          const targetX = racer.laneX + racer.direction * Phaser.Math.Clamp(drop * (1 + liveBoost) * 0.18, 12, 30);
+          racer.sprite.setPosition(
+            Phaser.Math.Clamp(
+              Phaser.Math.Linear(pivotX, targetX, release),
+              Math.max(50, racer.laneX - 34),
+              Math.min(WIDTH - 50, racer.laneX + 34)
+            ),
+            Phaser.Math.Linear(pivotY, landingY, release)
+          );
+          racer.sprite.setAngle(angle);
+          stickTogether.call(this, racer);
+          followRaceCamera.call(this);
+        },
+        onComplete: () => {
+          racer.sprite.setPosition(racer.laneX, landingY);
+          racer.anchorIndex = nextAnchor;
+          if (racer.sprite.y >= FLOOR_Y - 48) {
+            racer.done = true;
+            finishCount += 1;
+            if (finishCount === 1) finishRace.call(this, racer);
+            return;
+          }
+          stick.call(this, racer);
+        }
+      });
+    }
+
+    function stick(racer) {
+      if (racer.done || finished) return;
+      const pad = racer.limbs[racer.anchorIndex].pad;
+      racer.limbTweens.push(this.tweens.add({
+        targets: pad,
+        scaleX: 1.45,
+        scaleY: 0.65,
+        duration: 90,
+        yoyo: true
+      }));
+      racer.tween = this.tweens.add({
+        targets: racer.sprite,
+        scaleX: BASE_SCALE * 1.08,
+        scaleY: BASE_SCALE,
+        duration: 100,
+        yoyo: true,
+        onComplete: () => {
+          const boost = catchUpAmount(racer);
+          const isLeader = racer.sprite.y >= Math.max(...racers.map((player) => player.sprite.y)) - 3;
+          racer.timer = this.time.delayedCall(Phaser.Math.Between(220, 780) * (1 - boost * 0.45) + (isLeader ? 180 : 0), () => flip.call(this, racer));
+        }
+      });
+    }
+
+    function catchUpAmount(racer) {
+      return Phaser.Math.Clamp((Math.max(...racers.map((player) => player.sprite.y)) - racer.sprite.y) / 350, 0, 0.85);
+    }
+
+    function stickTogether(racer) {
+      const now = this.time.now;
+      const mate = racer.stickyWith;
+      if (mate && now < racer.stickyUntil && !mate.done) {
+        racer.sprite.x = Phaser.Math.Linear(racer.sprite.x, mate.sprite.x, 0.14);
+        racer.sprite.y = Phaser.Math.Linear(racer.sprite.y, mate.sprite.y, 0.08);
+        return;
+      }
+      racer.stickyWith = null;
+
+      const nearby = racers.find((other) => other !== racer && !other.done && !other.stickyWith
+        && Phaser.Math.Distance.Between(racer.sprite.x, racer.sprite.y, other.sprite.x, other.sprite.y) < 54);
+      if (!nearby) return;
+
+      const until = now + Phaser.Math.Between(260, 520);
+      racer.stickyWith = nearby;
+      nearby.stickyWith = racer;
+      racer.stickyUntil = nearby.stickyUntil = until;
+      [racer, nearby].forEach((player) => {
+        player.limbTweens.push(this.tweens.add({
+          targets: player.sprite,
+          scaleX: BASE_SCALE * 1.14,
+          scaleY: BASE_SCALE,
+          duration: 90,
+          yoyo: true
+        }));
+      });
+    }
+
+    function followRaceCamera() {
+      const leadY = Math.max(...racers.map((racer) => racer.sprite.y));
+      const targetY = Phaser.Math.Clamp(leadY - HEIGHT * 0.56, 0, FLOOR_Y - HEIGHT + 89);
+      this.cameras.main.scrollY = Phaser.Math.Linear(this.cameras.main.scrollY, targetY, 0.08);
+    }
+
+    function finishRace(winner) {
+      finished = true;
+      racers.forEach((racer) => {
+        racer.timer?.remove(false);
+        racer.tween?.stop();
+        racer.limbTweens.forEach((tween) => tween.stop());
+        this.tweens.killTweensOf(racer.sprite);
+      });
+      guide.setVisible(true).setText(`${winner.name} 우승!\n다시 하려면 터치`).setAlign('center').setBackgroundColor('#fff4b8').setInteractive({ useHandCursor: true });
+    }
+
+    function animateLimbs(racer, anchorIndex) {
+      racer.limbTweens.forEach((tween) => tween.stop());
+      racer.limbTweens = [];
+      const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+      const pose = racer.posePhase
+        ? [135, -45, 42, -138]
+        : [45, -135, 138, -42];
+      const jointPose = racer.posePhase
+        ? [28, -42, 48, -34]
+        : [42, -28, 34, -48];
+      racer.limbs.forEach((limb, index) => {
+        const anchored = index === anchorIndex;
+        const delay = anchored ? 0 : order.indexOf(index) * Phaser.Math.Between(90, 160);
+        racer.limbTweens.push(this.tweens.add({
+          targets: limb,
+          angle: pose[index] + Phaser.Math.Between(-12, 12),
+          scaleY: anchored ? 1.22 : Phaser.Math.FloatBetween(0.94, 1.18),
+          duration: Phaser.Math.Between(260, 520),
+          delay,
+          ease: 'Sine.easeInOut',
+          yoyo: false
+        }));
+        racer.limbTweens.push(this.tweens.add({
+          targets: limb.joint,
+          angle: jointPose[index] + Phaser.Math.Between(-12, 12),
+          scaleY: anchored ? 1.08 : Phaser.Math.FloatBetween(0.82, 1.22),
+          duration: Phaser.Math.Between(220, 430),
+          delay: delay + Phaser.Math.Between(70, 150),
+          ease: 'Sine.easeInOut',
+          yoyo: false
+        }));
+      });
+      const bend = racer.direction * Phaser.Math.Between(16, 30);
+      racer.limbTweens.push(
+        this.tweens.add({ targets: racer.sprite.chest, angle: bend, scaleY: 0.88, duration: 330, ease: 'Sine.easeInOut' }),
+        this.tweens.add({ targets: racer.sprite.head, angle: -bend * 0.75, y: -19, duration: 290, delay: 110, ease: 'Sine.easeInOut' })
+      );
+    }
+
+    function limbEnd(limb) {
+      const upperAngle = Phaser.Math.DegToRad(limb.angle);
+      const lowerAngle = Phaser.Math.DegToRad(limb.angle + limb.joint.angle);
+      return {
+        x: limb.x - Math.sin(upperAngle) * limb.upperLength - Math.sin(lowerAngle) * limb.lowerLength,
+        y: limb.y + Math.cos(upperAngle) * limb.upperLength + Math.cos(lowerAngle) * limb.lowerLength
+      };
+    }
+
+    function rotatePoint(point, angle) {
+      const rad = Phaser.Math.DegToRad(angle);
+      return {
+        x: point.x * Math.cos(rad) - point.y * Math.sin(rad),
+        y: point.x * Math.sin(rad) + point.y * Math.cos(rad)
+      };
+    }
+
+    function createFaceTexture(photo, index) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      if (photo) drawFace(canvas.getContext('2d'), photo, 64);
+      else drawDefaultFace(canvas.getContext('2d'), 64);
+      this.textures.addCanvas(`face-${index}`, canvas);
+    }
+
+    function createSlime(x, y, color, playerIndex) {
+      const root = this.add.container(x, y);
+      const limbSpecs = [
+        [-16, -5, 102, 34], [16, -5, -102, 34],
+        [-10, 23, 16, 37], [10, 23, -16, 37]
+      ];
+
+      limbSpecs.forEach(([limbX, limbY, angle, length], index) => {
+        const limb = this.add.container(limbX, limbY).setAngle(angle);
+        const upperLength = Math.round(length * 0.48);
+        const lowerLength = length - upperLength;
+        const joint = this.add.container(0, upperLength);
+        limb.homeAngle = angle;
+        limb.upperLength = upperLength;
+        limb.lowerLength = lowerLength;
+        limb.joint = joint;
+        joint.homeAngle = 0;
+        const pad = this.add.container(0, lowerLength);
+        pad.add([
+          this.add.ellipse(1, 2, index < 2 ? 22 : 25, 15, 0x000000, 0.14),
+          this.add.ellipse(0, 0, index < 2 ? 22 : 25, 15, color, 0.96),
+          this.add.ellipse(-3, -2, 6, 3, 0xffffff, 0.38)
+        ]);
+        limb.pad = pad;
+        limb.add([
+          this.add.rectangle(1, 2, 12, upperLength + 3, 0x000000, 0.12).setOrigin(0.5, 0),
+          this.add.rectangle(0, 0, 12, upperLength + 3, color).setOrigin(0.5, 0),
+          this.add.rectangle(-2, 1, 3, upperLength - 2, 0xffffff, 0.18).setOrigin(0.5, 0),
+          joint
+        ]);
+        joint.add([
+          this.add.rectangle(1, 0, 12, lowerLength + 4, 0x000000, 0.12).setOrigin(0.5, 0),
+          this.add.rectangle(0, -2, 12, lowerLength + 4, color).setOrigin(0.5, 0),
+          this.add.rectangle(-2, -1, 3, lowerLength, 0xffffff, 0.18).setOrigin(0.5, 0),
+          pad
+        ]);
+        root.add(limb);
+      });
+
+      const chest = this.add.container(0, -2);
+      const head = this.add.container(0, -22);
+      root.add([
+        this.add.ellipse(2, 18, 34, 29, 0x000000, 0.14),
+        this.add.ellipse(0, 15, 34, 29, color),
+        this.add.ellipse(-6, 10, 11, 7, 0xffffff, 0.18),
+        chest,
+        head
+      ]);
+      chest.add([
+        this.add.ellipse(2, 3, 37, 38, 0x000000, 0.14),
+        this.add.ellipse(0, 0, 37, 38, color),
+        this.add.ellipse(-7, -8, 13, 9, 0xffffff, 0.18)
+      ]);
+      head.add([
+        this.add.ellipse(2, 3, 44, 40, 0x000000, 0.14),
+        this.add.ellipse(0, 0, 44, 40, color),
+        this.add.ellipse(-8, -10, 15, 9, 0xffffff, 0.22),
+        this.add.image(0, 0, `face-${playerIndex}`).setDisplaySize(34, 34)
+      ]);
+      root.chest = chest;
+      root.head = head;
+      return root.setScale(BASE_SCALE);
+    }
+
+    function drawRoom() {
+      const background = this.add.graphics();
+      background.fillStyle(0xf5ead9).fillRect(0, 0, WIDTH, FLOOR_Y + 89);
+
+      for (let y = 104; y < FLOOR_Y; y += 72) {
+        background.lineStyle(1, 0xd9c9b4, 0.55).lineBetween(0, y, WIDTH, y);
+      }
+      for (let x = 12; x < WIDTH; x += 24) {
+        background.lineStyle(1, 0xffffff, 0.2).lineBetween(x, 92, x, FLOOR_Y);
+      }
+
+      background.lineStyle(4, 0x6f5c75, 0.95).lineBetween(18, START_LINE_Y, WIDTH - 18, START_LINE_Y);
+      background.fillStyle(0x6f5c75).fillRect(0, FLOOR_Y, WIDTH, 89);
+      const hud = this.add.graphics().setScrollFactor(0).setDepth(10);
+      hud.fillStyle(0x413647).fillRect(0, 0, WIDTH, 58);
+      this.add.text(18, 17, '찰싹 레이스', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '22px', fontStyle: '900', color: '#ffffff'
+      }).setScrollFactor(0).setDepth(11);
+      this.add.text(WIDTH - 16, 23, 'PROTOTYPE', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#d8cadd'
+      }).setOrigin(1, 0).setScrollFactor(0).setDepth(11);
+      this.add.text(WIDTH / 2, FLOOR_Y + 21, 'FINISH', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: '900', color: '#e8dce9'
+      }).setOrigin(0.5);
+    }
+
+    console.assert(NAMES.length === 4, '프로토타입은 레이서 4명을 사용합니다.');
+
+    function launchGame() {
+      new Phaser.Game({
+        type: Phaser.AUTO,
+        parent: 'game',
+        width: WIDTH,
+        height: HEIGHT,
+        backgroundColor: '#f5ead9',
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+        scene: { create }
+      });
+    }
+  </script>
+</body>
+</html>
