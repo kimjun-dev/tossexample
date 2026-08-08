@@ -282,10 +282,12 @@
           );
           racer.sprite.setAngle(angle);
           stickTogether.call(this, racer);
+          racer.label.setPosition(racer.sprite.x, racer.sprite.y - 56);
           followRaceCamera.call(this);
         },
         onComplete: () => {
           racer.sprite.setPosition(racer.laneX, landingY);
+          racer.label.setPosition(racer.sprite.x, racer.sprite.y - 56);
           racer.anchorIndex = nextAnchor;
           if (racer.sprite.y >= FLOOR_Y - 48) {
             racer.done = true;
