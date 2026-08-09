@@ -9,7 +9,7 @@
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #211d2b; }
     body { display: grid; place-items: center; font-family: Pretendard, system-ui, sans-serif; }
     #game { position: relative; width: min(100vw, 430px); height: 100dvh; max-height: 900px; overflow: hidden; background: #f5ead9; }
-    canvas { display: block; width: 100%; height: 100%; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     #hud { position: absolute; inset: max(16px, env(safe-area-inset-top)) 16px auto; z-index: 2; display: flex; justify-content: space-between; pointer-events: none; color: #4a3f51; font-weight: 900; text-shadow: 0 2px 0 #fff8; }
     #guide { position: absolute; z-index: 3; left: 50%; bottom: max(52px, calc(env(safe-area-inset-bottom) + 28px)); transform: translateX(-50%); width: max-content; max-width: 86%; padding: 13px 22px; border: 0; border-radius: 999px; background: #fff4b8; color: #44374b; box-shadow: 0 8px 24px #4c3b4f33; font: 800 15px/1.35 inherit; cursor: pointer; }
     .player-label { position: absolute; z-index: 2; transform: translate(-50%, -100%); color: #4a3f51; font-size: 13px; font-weight: 900; white-space: nowrap; text-shadow: 0 2px 2px #fff, 0 0 4px #fff; pointer-events: none; }
@@ -19,7 +19,7 @@
 <body>
   <main id="game" aria-label="찰싹 레이스 게임">
     <div id="hud"><span>찰싹 레이스</span><span id="status">준비</span></div>
-    <button id="guide" type="button">터치해서 시작</button>
+    <button id="guide" type="button">캐릭터를 드래그해 배치한 뒤 시작</button>
     <div id="error">게임을 불러오지 못했어요.<br />화면을 새로고침해 주세요.</div>
   </main>
   <script type="module" src="./game.js"></script>

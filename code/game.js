@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 const WIDTH = 390;
 const HEIGHT = 844;
+const START_LINE_Y = 360;
 const FLOOR_Y = 1510;
 const WALL_Z = -5;
 const NAMES = ['플레이어 1', '플레이어 2', '플레이어 3', '플레이어 4'];
@@ -61,7 +62,7 @@ function makeWall() {
   }
   ctx.strokeStyle = '#705f75';
   ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(20, 360); ctx.lineTo(370, 360); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(20, START_LINE_Y); ctx.lineTo(370, START_LINE_Y); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(20, FLOOR_Y); ctx.lineTo(370, FLOOR_Y); ctx.stroke();
   ctx.fillStyle = '#705f75';
   ctx.font = '900 18px system-ui';
@@ -249,6 +250,7 @@ function rotationSinceFlip(racer) {
 
 function createRacer(index) {
   const x = -136.5 + index * 91;
+  const initialGrip = 0.45 + index * 0.14;
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, screenToWorldY(150), 5)
@@ -270,17 +272,52 @@ function createRacer(index) {
     visual: makeVisual(index, COLORS[index]),
     label,
     anchors: [],
-    gripElapsed: -(0.45 + index * 0.14),
+    gripElapsed: -initialGrip,
     flipStart: { ...body.rotation() },
     flipDirection: index % 2 ? -1 : 1,
     isFlipping: false,
-    stickDuration: 0,
+    stickDuration: initialGrip,
     placed: false
   };
   START_PADS[index].forEach((pad) => attachPad(racer, pad));
   body.setAngvel({ x: 0.12 * (index - 1.5), y: 0.08 * (1.5 - index), z: 0.05 * (index % 2 ? 1 : -1) }, true);
   return racer;
 }
+
+function placeRacer(racer, x, screenY) {
+  [...racer.anchors].forEach((anchor) => detachPad(racer, anchor));
+  racer.body.setTranslation({ x, y: screenToWorldY(screenY), z: 5 }, true);
+  racer.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+  racer.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  START_PADS[racer.index].forEach((pad) => attachPad(racer, pad));
+}
+
+function pointerWorld(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width - 0.5) * (camera.right - camera.left);
+  const y = camera.position.y + (0.5 - (event.clientY - rect.top) / rect.height) * HEIGHT;
+  return { x, y };
+}
+
+let draggedRacer = null;
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  if (running || finished) return;
+  const point = pointerWorld(event);
+  draggedRacer = racers.reduce((closest, racer) => {
+    const position = racer.body.translation();
+    const distance = Math.hypot(position.x - point.x, position.y - point.y);
+    return distance < closest.distance ? { racer, distance } : closest;
+  }, { racer: null, distance: 48 }).racer;
+  if (draggedRacer) renderer.domElement.setPointerCapture(event.pointerId);
+});
+renderer.domElement.addEventListener('pointermove', (event) => {
+  if (!draggedRacer) return;
+  const point = pointerWorld(event);
+  placeRacer(draggedRacer, THREE.MathUtils.clamp(point.x, -160, 160), THREE.MathUtils.clamp(point.y, screenToWorldY(START_LINE_Y - 55), screenToWorldY(105)));
+});
+renderer.domElement.addEventListener('pointerup', () => { draggedRacer = null; });
+renderer.domElement.addEventListener('pointercancel', () => { draggedRacer = null; });
 
 function syncVisuals(dt) {
   let lowest = Infinity;
@@ -315,7 +352,7 @@ function syncVisuals(dt) {
     racer.label.style.left = `${(projected.x * 0.5 + 0.5) * game.clientWidth}px`;
     racer.label.style.top = `${(-projected.y * 0.5 + 0.5) * game.clientHeight}px`;
 
-    if (!racer.placed && position.y < screenToWorldY(FLOOR_Y - 45)) {
+    if (!racer.placed && position.y < screenToWorldY(FLOOR_Y)) {
       racer.placed = true;
       if (!finished) finishRace(racer);
     }
