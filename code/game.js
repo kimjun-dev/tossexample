@@ -284,9 +284,9 @@ function createRacer(index) {
   return racer;
 }
 
-function placeRacer(racer, x, screenY) {
+function placeRacer(racer, x, worldY) {
   [...racer.anchors].forEach((anchor) => detachPad(racer, anchor));
-  racer.body.setTranslation({ x, y: screenToWorldY(screenY), z: 5 }, true);
+  racer.body.setTranslation({ x, y: worldY, z: 5 }, true);
   racer.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
   racer.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
   racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
