@@ -2,21 +2,27 @@
   "name": "8tosshackerton",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kimjun-dev/tossexample.git"
   },
   "keywords": [],
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/kimjun-dev/tossexample/issues"
   },
   "homepage": "https://github.com/kimjun-dev/tossexample#readme",
   "dependencies": {
-    "phaser": "^4.2.0"
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^8.2.1"
   }
 }
