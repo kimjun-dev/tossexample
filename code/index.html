@@ -48,7 +48,9 @@
     const START_LINE_Y = 360;
     const BASE_SCALE = 0.8;
     const NAMES = ['플레이어 1', '플레이어 2', '플레이어 3', '플레이어 4'];
-    const COLORS = [0xdc55f6, 0xff8b32, 0x63df87, 0x27c8ef];
+    const COLORS = [0x242223, 0xd8d2c8, 0xe8d39a, 0xb97845];
+    const MatterBody = Phaser.Physics.Matter.Matter.Body;
+    const MatterConstraint = Phaser.Physics.Matter.Matter.Constraint;
 
     let racers = [];
     let started = false;
@@ -158,24 +160,26 @@
       racers = NAMES.map((name, index) => {
         const x = 58 + index * 91;
         const sprite = createSlime.call(this, x, 150, COLORS[index], index);
+        const ragdoll = createRagdoll.call(this, x, 150, index);
 
         return {
           sprite,
+          body: ragdoll.torso,
+          ragdoll,
           limbs: sprite.list.slice(0, 4),
           laneX: x,
           startY: 150,
           name,
-          label: this.add.text(x, 89, name, {
+          label: this.add.text(x, 68, name, {
             fontFamily: 'system-ui, sans-serif', fontSize: '15px', fontStyle: '700', color: '#3b3241'
           }).setOrigin(0.5),
           timer: null,
-          tween: null,
+          collisionTimer: null,
           limbTweens: [],
-          direction: index % 2 ? 1 : -1,
-          anchorIndex: index % 2,
-          posePhase: index % 2 === 0,
-          stickyWith: null,
-          stickyUntil: 0,
+          anchorMode: 'hands',
+          anchorPads: [],
+          anchorY: 0,
+          anchorConstraints: [],
           done: false
         };
       });
@@ -190,8 +194,9 @@
         if (!racer) return;
         racer.laneX = Phaser.Math.Clamp(dragX, 34, WIDTH - 34);
         racer.startY = Phaser.Math.Clamp(dragY, 105, START_LINE_Y - 48);
-        racer.sprite.setPosition(racer.laneX, racer.startY);
-        racer.label.setPosition(racer.laneX, racer.startY - 56);
+        resetRagdoll.call(this, racer, racer.laneX, racer.startY);
+        syncRagdoll(racer);
+        racer.label.setPosition(racer.laneX, racer.startY - 82);
       });
 
       guide = this.add.text(WIDTH / 2, 475, '출발선 위 공간에서 캐릭터를 배치한 뒤\n여기를 눌러 찰싹!', {
@@ -200,6 +205,7 @@
       }).setOrigin(0.5).setScrollFactor(0).setDepth(20).setInteractive({ useHandCursor: true });
 
       this.cameras.main.setBounds(0, 0, WIDTH, FLOOR_Y + 89);
+      this.matter.world.setBounds(0, 0, WIDTH, FLOOR_Y + 89, 32, false, false, false, true);
 
       guide.on('pointerdown', () => {
         if (!started || finished) startRace.call(this);
@@ -207,227 +213,144 @@
     }
 
     function startRace() {
-      racers.forEach((racer, index) => {
-        racer.timer?.remove(false);
-        racer.tween?.stop();
-        racer.limbTweens.forEach((tween) => tween.stop());
-        racer.limbs.forEach((limb) => limb.setAngle(limb.homeAngle));
-        racer.limbs.forEach((limb) => {
-          limb.setScale(1);
-          limb.joint.setAngle(limb.joint.homeAngle).setScale(1);
-          limb.pad.setScale(1);
-        });
-        racer.sprite.chest.setPosition(0, -2).setAngle(0).setScale(1);
-        racer.sprite.head.setPosition(0, -22).setAngle(0).setScale(1);
-        this.tweens.killTweensOf(racer.sprite);
-        racer.done = false;
-        racer.sprite.setPosition(racer.laneX, racer.startY);
-        racer.sprite.setAngle(index % 2 ? 8 : -8);
-        racer.sprite.setScale(BASE_SCALE);
-        racer.anchorIndex = index % 2;
-        racer.posePhase = index % 2 === 0;
-        racer.stickyWith = null;
-        racer.stickyUntil = 0;
-        this.time.delayedCall(index * 110, () => stick.call(this, racer));
-      });
-
       started = true;
       finished = false;
       finishCount = 0;
+      this.cameras.main.scrollY = 0;
+
+      racers.forEach((racer, index) => {
+        racer.timer?.remove(false);
+        racer.collisionTimer?.remove(false);
+        racer.limbTweens.forEach((tween) => tween.stop());
+        removeAnchors.call(this, racer);
+        resetRagdoll.call(this, racer, racer.laneX, racer.startY);
+        racer.done = false;
+        racer.anchorMode = 'hands';
+        setRacerCollision(racer, false);
+        attachPads.call(this, racer, index % 2 ? [1, 0] : [0, 1]);
+        racer.ragdoll.bodies.forEach((body) => MatterBody.setStatic(body, false));
+        racer.collisionTimer = this.time.delayedCall(700, () => setRacerCollision(racer, true));
+      });
+
       guide.setVisible(false).disableInteractive();
     }
 
-    function flip(racer) {
-      if (racer.done || finished) return;
-      const startY = racer.sprite.y;
-      const startAngle = racer.sprite.angle;
-      const drop = Phaser.Math.Between(62, 92);
-      const duration = Phaser.Math.Between(650, 1050);
-      let landingY = startY + drop;
-      const turn = Phaser.Math.Between(120, 220);
-      const progress = { value: 0 };
-      const anchor = racer.limbs[racer.anchorIndex];
-      const anchorPoint = limbEnd(anchor);
-      const fixedPoint = rotatePoint(anchorPoint, startAngle);
-      fixedPoint.x += racer.sprite.x;
-      fixedPoint.y += racer.sprite.y;
-      let nextAnchor = Math.random() < 0.75 ? 3 - racer.anchorIndex : Phaser.Math.Between(0, 3);
-      if (nextAnchor === racer.anchorIndex) nextAnchor = 3 - racer.anchorIndex;
-
-      if (Math.random() < 0.2) racer.direction *= -1;
-      racer.posePhase = !racer.posePhase;
-      animateLimbs.call(this, racer, racer.anchorIndex);
-
-      racer.tween = this.tweens.add({
-        targets: progress,
-        value: 1,
-        duration,
-        ease: 'Cubic.easeInOut',
-        onUpdate: () => {
-          const angle = startAngle + racer.direction * turn * progress.value;
-          const rotatedAnchor = rotatePoint(anchorPoint, angle);
-          const pivotX = fixedPoint.x - rotatedAnchor.x;
-          const pivotY = fixedPoint.y + progress.value * 7 - rotatedAnchor.y;
-          const release = Phaser.Math.Clamp((progress.value - 0.62) / 0.38, 0, 1);
-          const liveBoost = catchUpAmount(racer);
-          landingY = startY + drop * (1 + liveBoost);
-          const targetX = racer.laneX + racer.direction * Phaser.Math.Clamp(drop * (1 + liveBoost) * 0.18, 12, 30);
-          racer.sprite.setPosition(
-            Phaser.Math.Clamp(
-              Phaser.Math.Linear(pivotX, targetX, release),
-              Math.max(50, racer.laneX - 34),
-              Math.min(WIDTH - 50, racer.laneX + 34)
-            ),
-            Phaser.Math.Linear(pivotY, landingY, release)
-          );
-          racer.sprite.setAngle(angle);
-          stickTogether.call(this, racer);
-          racer.label.setPosition(racer.sprite.x, racer.sprite.y - 56);
-          followRaceCamera.call(this);
-        },
-        onComplete: () => {
-          racer.sprite.setPosition(racer.laneX, landingY);
-          racer.label.setPosition(racer.sprite.x, racer.sprite.y - 56);
-          racer.anchorIndex = nextAnchor;
-          if (racer.sprite.y >= FLOOR_Y - 48) {
-            racer.done = true;
-            finishCount += 1;
-            if (finishCount === 1) finishRace.call(this, racer);
-            return;
-          }
-          stick.call(this, racer);
+    function update() {
+      racers.forEach((racer) => {
+        if (started && !finished && !stabilizeRagdoll(racer)) {
+          recoverRacer.call(this, racer);
+        }
+        syncRagdoll(racer);
+        racer.label.setPosition(racer.body.position.x, racer.body.position.y - 82);
+        if (started && !finished && !racer.done && racer.body.position.y >= FLOOR_Y - 48) {
+          racer.done = true;
+          finishCount += 1;
+          if (finishCount === 1) finishRace.call(this, racer);
         }
       });
+      if (started && !finished) followRaceCamera.call(this);
     }
 
-    function stick(racer) {
-      if (racer.done || finished) return;
-      const pad = racer.limbs[racer.anchorIndex].pad;
-      racer.limbTweens.push(this.tweens.add({
-        targets: pad,
-        scaleX: 1.45,
-        scaleY: 0.65,
-        duration: 90,
-        yoyo: true
-      }));
-      racer.tween = this.tweens.add({
-        targets: racer.sprite,
-        scaleX: BASE_SCALE * 1.08,
-        scaleY: BASE_SCALE,
-        duration: 100,
-        yoyo: true,
-        onComplete: () => {
-          const boost = catchUpAmount(racer);
-          const isLeader = racer.sprite.y >= Math.max(...racers.map((player) => player.sprite.y)) - 3;
-          racer.timer = this.time.delayedCall(Phaser.Math.Between(220, 780) * (1 - boost * 0.45) + (isLeader ? 180 : 0), () => flip.call(this, racer));
-        }
-      });
-    }
-
-    function catchUpAmount(racer) {
-      return Phaser.Math.Clamp((Math.max(...racers.map((player) => player.sprite.y)) - racer.sprite.y) / 350, 0, 0.85);
-    }
-
-    function stickTogether(racer) {
-      const now = this.time.now;
-      const mate = racer.stickyWith;
-      if (mate && now < racer.stickyUntil && !mate.done) {
-        racer.sprite.x = Phaser.Math.Linear(racer.sprite.x, mate.sprite.x, 0.14);
-        racer.sprite.y = Phaser.Math.Linear(racer.sprite.y, mate.sprite.y, 0.08);
-        return;
+    function stabilizeRagdoll(racer) {
+      if (racer.ragdoll.bodies.some((body) => !Number.isFinite(body.position.x) || !Number.isFinite(body.position.y))) {
+        return false;
       }
-      racer.stickyWith = null;
+      racer.ragdoll.bodies.forEach((body) => {
+        MatterBody.setVelocity(body, {
+          x: Phaser.Math.Clamp(body.velocity.x, -7, 7),
+          y: Phaser.Math.Clamp(body.velocity.y, -7, 7)
+        });
+        MatterBody.setAngularVelocity(body, Phaser.Math.Clamp(body.angularVelocity, -0.16, 0.16));
+      });
+      return true;
+    }
 
-      const nearby = racers.find((other) => other !== racer && !other.done && !other.stickyWith
-        && Phaser.Math.Distance.Between(racer.sprite.x, racer.sprite.y, other.sprite.x, other.sprite.y) < 54);
-      if (!nearby) return;
+    function recoverRacer(racer) {
+      racer.timer?.remove(false);
+      racer.collisionTimer?.remove(false);
+      removeAnchors.call(this, racer);
+      resetRagdoll.call(this, racer, racer.laneX, racer.startY);
+      racer.anchorMode = 'hands';
+      setRacerCollision(racer, false);
+      attachPads.call(this, racer, [0, 1]);
+      racer.ragdoll.bodies.forEach((body) => MatterBody.setStatic(body, false));
+      racer.collisionTimer = this.time.delayedCall(700, () => setRacerCollision(racer, true));
+    }
 
-      const until = now + Phaser.Math.Between(260, 520);
-      racer.stickyWith = nearby;
-      nearby.stickyWith = racer;
-      racer.stickyUntil = nearby.stickyUntil = until;
-      [racer, nearby].forEach((player) => {
-        player.limbTweens.push(this.tweens.add({
-          targets: player.sprite,
-          scaleX: BASE_SCALE * 1.14,
-          scaleY: BASE_SCALE,
-          duration: 90,
+    function attachPads(racer, padIndices) {
+      if (racer.done || finished) return;
+      const orderedPads = [...padIndices].sort((first, second) => (
+        racer.ragdoll.limbs[second].pad.position.y - racer.ragdoll.limbs[first].pad.position.y
+      ));
+      racer.anchorPads = orderedPads;
+      racer.anchorMode = padIndices[0] < 2 ? 'hands' : 'feet';
+      const primaryPad = racer.ragdoll.limbs[orderedPads[0]].pad;
+      racer.anchorY = primaryPad.position.y;
+      const constraint = MatterConstraint.create({
+        pointA: { x: Phaser.Math.Clamp(primaryPad.position.x, 18, WIDTH - 18), y: primaryPad.position.y },
+        bodyB: primaryPad,
+        length: 1,
+        stiffness: 0.58,
+        damping: 0.3
+      });
+      this.matter.world.add(constraint);
+      racer.anchorConstraints = [constraint];
+
+      orderedPads.forEach((padIndex, order) => {
+        const pad = racer.limbs[padIndex].pad;
+        racer.limbTweens.push(this.tweens.add({
+          targets: pad,
+          scaleX: order === 0 ? 1.4 : 1.16,
+          scaleY: order === 0 ? 0.68 : 0.9,
+          duration: 100,
           yoyo: true
         }));
+      });
+      racer.timer = this.time.delayedCall(Phaser.Math.Between(380, 720), () => switchAnchor.call(this, racer));
+    }
+
+    function switchAnchor(racer) {
+      if (racer.done || finished) return;
+      const nextPads = racer.anchorMode === 'hands' ? [2, 3] : [0, 1];
+      const nextY = Math.max(...nextPads.map((index) => racer.ragdoll.limbs[index].pad.position.y));
+      if (nextY <= racer.anchorY + 8) {
+        racer.timer = this.time.delayedCall(90, () => switchAnchor.call(this, racer));
+        return;
+      }
+      const oldAnchors = racer.anchorConstraints;
+      attachPads.call(this, racer, nextPads);
+      this.time.delayedCall(Phaser.Math.Between(90, 150), () => {
+        oldAnchors.forEach((constraint) => this.matter.world.remove(constraint));
+      });
+    }
+
+    function removeAnchors(racer) {
+      racer.anchorConstraints.forEach((constraint) => this.matter.world.remove(constraint));
+      racer.anchorConstraints = [];
+    }
+
+    function setRacerCollision(racer, enabled) {
+      racer.ragdoll.bodies.forEach((body) => {
+        body.collisionFilter.mask = enabled ? 0xffffffff : 1;
       });
     }
 
     function followRaceCamera() {
-      const leadY = Math.max(...racers.map((racer) => racer.sprite.y));
+      const positions = racers.map((racer) => racer.body.position.y).filter(Number.isFinite);
+      if (!positions.length) return;
+      const leadY = Phaser.Math.Clamp(Math.max(...positions), 0, FLOOR_Y);
       const targetY = Phaser.Math.Clamp(leadY - HEIGHT * 0.56, 0, FLOOR_Y - HEIGHT + 89);
-      this.cameras.main.scrollY = Phaser.Math.Linear(this.cameras.main.scrollY, targetY, 0.08);
+      const cameraStep = Phaser.Math.Clamp(targetY - this.cameras.main.scrollY, -4, 4);
+      this.cameras.main.scrollY += cameraStep;
     }
 
     function finishRace(winner) {
       finished = true;
       racers.forEach((racer) => {
         racer.timer?.remove(false);
-        racer.tween?.stop();
         racer.limbTweens.forEach((tween) => tween.stop());
-        this.tweens.killTweensOf(racer.sprite);
       });
       guide.setVisible(true).setText(`${winner.name} 우승!\n다시 하려면 터치`).setAlign('center').setBackgroundColor('#fff4b8').setInteractive({ useHandCursor: true });
-    }
-
-    function animateLimbs(racer, anchorIndex) {
-      racer.limbTweens.forEach((tween) => tween.stop());
-      racer.limbTweens = [];
-      const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
-      const pose = racer.posePhase
-        ? [135, -45, 42, -138]
-        : [45, -135, 138, -42];
-      const jointPose = racer.posePhase
-        ? [28, -42, 48, -34]
-        : [42, -28, 34, -48];
-      racer.limbs.forEach((limb, index) => {
-        const anchored = index === anchorIndex;
-        const delay = anchored ? 0 : order.indexOf(index) * Phaser.Math.Between(90, 160);
-        racer.limbTweens.push(this.tweens.add({
-          targets: limb,
-          angle: pose[index] + Phaser.Math.Between(-12, 12),
-          scaleY: anchored ? 1.22 : Phaser.Math.FloatBetween(0.94, 1.18),
-          duration: Phaser.Math.Between(260, 520),
-          delay,
-          ease: 'Sine.easeInOut',
-          yoyo: false
-        }));
-        racer.limbTweens.push(this.tweens.add({
-          targets: limb.joint,
-          angle: jointPose[index] + Phaser.Math.Between(-12, 12),
-          scaleY: anchored ? 1.08 : Phaser.Math.FloatBetween(0.82, 1.22),
-          duration: Phaser.Math.Between(220, 430),
-          delay: delay + Phaser.Math.Between(70, 150),
-          ease: 'Sine.easeInOut',
-          yoyo: false
-        }));
-      });
-      const bend = racer.direction * Phaser.Math.Between(16, 30);
-      racer.limbTweens.push(
-        this.tweens.add({ targets: racer.sprite.chest, angle: bend, scaleY: 0.88, duration: 330, ease: 'Sine.easeInOut' }),
-        this.tweens.add({ targets: racer.sprite.head, angle: -bend * 0.75, y: -19, duration: 290, delay: 110, ease: 'Sine.easeInOut' })
-      );
-    }
-
-    function limbEnd(limb) {
-      const upperAngle = Phaser.Math.DegToRad(limb.angle);
-      const lowerAngle = Phaser.Math.DegToRad(limb.angle + limb.joint.angle);
-      return {
-        x: limb.x - Math.sin(upperAngle) * limb.upperLength - Math.sin(lowerAngle) * limb.lowerLength,
-        y: limb.y + Math.cos(upperAngle) * limb.upperLength + Math.cos(lowerAngle) * limb.lowerLength
-      };
-    }
-
-    function rotatePoint(point, angle) {
-      const rad = Phaser.Math.DegToRad(angle);
-      return {
-        x: point.x * Math.cos(rad) - point.y * Math.sin(rad),
-        y: point.x * Math.sin(rad) + point.y * Math.cos(rad)
-      };
     }
 
     function createFaceTexture(photo, index) {
@@ -438,11 +361,112 @@
       this.textures.addCanvas(`face-${index}`, canvas);
     }
 
+    function createRagdoll(x, y, playerIndex) {
+      const group = -(playerIndex + 1);
+      const bodyOptions = {
+        isStatic: false,
+        collisionFilter: { group, category: 1 << (playerIndex + 1), mask: 1 },
+        friction: 0.8,
+        frictionStatic: 1,
+        frictionAir: 0.07,
+        restitution: 0.01,
+        density: 0.002
+      };
+      const torso = this.matter.add.rectangle(x, y, 30 * BASE_SCALE, 39 * BASE_SCALE, bodyOptions);
+      const head = this.matter.add.circle(x, y - 22 * BASE_SCALE, 20 * BASE_SCALE, bodyOptions);
+      const bodies = [torso, head];
+      const limbs = [];
+      const limbSpecs = [
+        [-17, -5, 102, 32], [17, -5, -102, 32],
+        [-10, 19, 16, 30], [10, 19, -16, 30]
+      ];
+
+      this.matter.add.constraint(torso, head, 0, 0.45, {
+          pointA: { x: 0, y: -14 * BASE_SCALE },
+          pointB: { x: 0, y: 12 * BASE_SCALE },
+        damping: 0.16
+      });
+
+      limbSpecs.forEach(([limbX, limbY, angle, length], index) => {
+        const upperLength = Math.round(length * 0.48) * BASE_SCALE;
+        const lowerLength = (length - Math.round(length * 0.48)) * BASE_SCALE;
+        const shoulder = { x: x + limbX * BASE_SCALE, y: y + limbY * BASE_SCALE };
+        const elbow = pointAlong(shoulder, angle, upperLength);
+        const end = pointAlong(elbow, angle, lowerLength);
+        const upperCenter = pointAlong(shoulder, angle, upperLength / 2);
+        const lowerCenter = pointAlong(elbow, angle, lowerLength / 2);
+        const upper = this.matter.add.rectangle(upperCenter.x, upperCenter.y, 12 * BASE_SCALE, upperLength, bodyOptions);
+        const lower = this.matter.add.rectangle(lowerCenter.x, lowerCenter.y, 12 * BASE_SCALE, lowerLength, bodyOptions);
+        const pad = this.matter.add.circle(end.x, end.y, (index < 2 ? 9 : 10) * BASE_SCALE, bodyOptions);
+
+        [upper, lower].forEach((body) => MatterBody.setAngle(body, Phaser.Math.DegToRad(angle)));
+        this.matter.add.constraint(torso, upper, 0, 0.52, {
+          pointA: { x: limbX * BASE_SCALE, y: limbY * BASE_SCALE },
+          pointB: { x: 0, y: -upperLength / 2 },
+          damping: 0.14
+        });
+        this.matter.add.constraint(upper, lower, 0, 0.45, {
+          pointA: { x: 0, y: upperLength / 2 },
+          pointB: { x: 0, y: -lowerLength / 2 },
+          damping: 0.14
+        });
+        this.matter.add.constraint(lower, pad, 0, 0.55, {
+          pointA: { x: 0, y: lowerLength / 2 },
+          damping: 0.16
+        });
+        limbs.push({ upper, lower, pad });
+        bodies.push(upper, lower, pad);
+      });
+
+      const initial = bodies.map((body) => ({ x: body.position.x - x, y: body.position.y - y, angle: body.angle }));
+      bodies.forEach((body) => MatterBody.setStatic(body, true));
+      return {
+        torso,
+        head,
+        limbs,
+        bodies,
+        initial
+      };
+    }
+
+    function pointAlong(point, angle, distance) {
+      const radians = Phaser.Math.DegToRad(angle);
+      return {
+        x: point.x - Math.sin(radians) * distance,
+        y: point.y + Math.cos(radians) * distance
+      };
+    }
+
+    function resetRagdoll(racer, x, y) {
+      racer.ragdoll.bodies.forEach((body, index) => {
+        const initial = racer.ragdoll.initial[index];
+        MatterBody.setStatic(body, true);
+        MatterBody.setPosition(body, { x: x + initial.x, y: y + initial.y });
+        MatterBody.setAngle(body, initial.angle);
+        MatterBody.setVelocity(body, { x: 0, y: 0 });
+        MatterBody.setAngularVelocity(body, 0);
+      });
+    }
+
+    function syncRagdoll(racer) {
+      const { torso, head, limbs } = racer.ragdoll;
+      racer.sprite.setPosition(torso.position.x, torso.position.y).setRotation(torso.angle).setScale(BASE_SCALE);
+
+      const headWobble = Phaser.Math.Clamp(head.angle - torso.angle, -0.18, 0.18);
+      racer.sprite.head.setPosition(0, -21).setRotation(headWobble * 0.35);
+      racer.limbs.forEach((limb, index) => {
+        const physics = limbs[index];
+        limb.setRotation(physics.upper.angle - torso.angle);
+        limb.joint.setRotation(physics.lower.angle - physics.upper.angle);
+        limb.pad.setRotation(physics.pad.angle - physics.lower.angle);
+      });
+    }
+
     function createSlime(x, y, color, playerIndex) {
       const root = this.add.container(x, y);
       const limbSpecs = [
-        [-16, -5, 102, 34], [16, -5, -102, 34],
-        [-10, 23, 16, 37], [10, 23, -16, 37]
+        [-17, -5, 102, 32], [17, -5, -102, 32],
+        [-10, 19, 16, 30], [10, 19, -16, 30]
       ];
 
       limbSpecs.forEach(([limbX, limbY, angle, length], index) => {
@@ -457,47 +481,105 @@
         joint.homeAngle = 0;
         const pad = this.add.container(0, lowerLength);
         pad.add([
-          this.add.ellipse(1, 2, index < 2 ? 22 : 25, 15, 0x000000, 0.14),
-          this.add.ellipse(0, 0, index < 2 ? 22 : 25, 15, color, 0.96),
-          this.add.ellipse(-3, -2, 6, 3, 0xffffff, 0.38)
+          this.add.ellipse(1, 2, index < 2 ? 21 : 23, 17, 0x000000, 0.12),
+          this.add.ellipse(0, 0, index < 2 ? 21 : 23, 17, color),
+          this.add.circle(-6, -4, 4, 0xffffff, 0.12),
+          this.add.circle(5, 3, 4, 0x000000, 0.06)
         ]);
         limb.pad = pad;
         limb.add([
-          this.add.rectangle(1, 2, 12, upperLength + 3, 0x000000, 0.12).setOrigin(0.5, 0),
-          this.add.rectangle(0, 0, 12, upperLength + 3, color).setOrigin(0.5, 0),
-          this.add.rectangle(-2, 1, 3, upperLength - 2, 0xffffff, 0.18).setOrigin(0.5, 0),
+          this.add.rectangle(1, 2, 15, upperLength + 4, 0x000000, 0.1).setOrigin(0.5, 0),
+          this.add.rectangle(0, 0, 15, upperLength + 4, color).setOrigin(0.5, 0),
+          this.add.circle(0, 2, 8, color),
+          this.add.circle(0, upperLength, 8, color),
+          this.add.circle(-4, upperLength * 0.35, 5, 0xffffff, 0.1),
           joint
         ]);
         joint.add([
-          this.add.rectangle(1, 0, 12, lowerLength + 4, 0x000000, 0.12).setOrigin(0.5, 0),
-          this.add.rectangle(0, -2, 12, lowerLength + 4, color).setOrigin(0.5, 0),
-          this.add.rectangle(-2, -1, 3, lowerLength, 0xffffff, 0.18).setOrigin(0.5, 0),
+          this.add.rectangle(1, 0, 15, lowerLength + 5, 0x000000, 0.1).setOrigin(0.5, 0),
+          this.add.rectangle(0, -2, 15, lowerLength + 5, color).setOrigin(0.5, 0),
+          this.add.circle(0, 0, 8, color),
+          this.add.circle(0, lowerLength, 8, color),
+          this.add.circle(4, lowerLength * 0.4, 5, 0x000000, 0.05),
           pad
         ]);
         root.add(limb);
       });
 
-      const chest = this.add.container(0, -2);
-      const head = this.add.container(0, -22);
-      root.add([
-        this.add.ellipse(2, 18, 34, 29, 0x000000, 0.14),
-        this.add.ellipse(0, 15, 34, 29, color),
-        this.add.ellipse(-6, 10, 11, 7, 0xffffff, 0.18),
-        chest,
-        head
+      const body = this.add.container(0, 7);
+      const head = this.add.container(0, -21);
+      body.add([
+        this.add.ellipse(2, 3, 47, 51, 0x000000, 0.12),
+        this.add.ellipse(0, 0, 47, 51, color),
+        this.add.circle(-18, -8, 7, color),
+        this.add.circle(18, 5, 7, color),
+        this.add.circle(-11, 18, 7, color),
+        this.add.circle(10, -18, 6, 0xffffff, 0.1)
       ]);
-      chest.add([
-        this.add.ellipse(2, 3, 37, 38, 0x000000, 0.14),
-        this.add.ellipse(0, 0, 37, 38, color),
-        this.add.ellipse(-7, -8, 13, 9, 0xffffff, 0.18)
-      ]);
+      if (playerIndex === 0) {
+        body.add([
+          this.add.rectangle(0, 5, 34, 28, 0xf1eee8),
+          this.add.rectangle(-9, 5, 5, 28, 0x343238).setAngle(-38),
+          this.add.rectangle(9, 5, 5, 28, 0x343238).setAngle(-38),
+          this.add.rectangle(-9, 5, 5, 28, 0x343238).setAngle(38),
+          this.add.rectangle(9, 5, 5, 28, 0x343238).setAngle(38)
+        ]);
+      }
+      if (playerIndex === 0) {
+        head.add([
+          this.add.triangle(-13, -22, -10, 15, 0, -12, 12, 15, color),
+          this.add.triangle(13, -22, -10, 15, 0, -12, 12, 15, color)
+        ]);
+      } else if (playerIndex === 1) {
+        head.add([
+          this.add.ellipse(-21, -4, 17, 29, color).setAngle(18),
+          this.add.ellipse(21, -4, 17, 29, color).setAngle(-18)
+        ]);
+      } else if (playerIndex === 2) {
+        head.add([
+          this.add.ellipse(-10, -35, 15, 42, color).setAngle(-7),
+          this.add.ellipse(10, -35, 15, 42, color).setAngle(7),
+          this.add.ellipse(-10, -36, 6, 28, 0xeeb8a8, 0.55).setAngle(-7),
+          this.add.ellipse(10, -36, 6, 28, 0xeeb8a8, 0.55).setAngle(7)
+        ]);
+      } else {
+        head.add([
+          this.add.circle(-17, -15, 10, color),
+          this.add.circle(17, -15, 10, color)
+        ]);
+      }
       head.add([
-        this.add.ellipse(2, 3, 44, 40, 0x000000, 0.14),
-        this.add.ellipse(0, 0, 44, 40, color),
-        this.add.ellipse(-8, -10, 15, 9, 0xffffff, 0.22),
-        this.add.image(0, 0, `face-${playerIndex}`).setDisplaySize(34, 34)
+        this.add.ellipse(2, 2, 48, 44, 0x000000, 0.12),
+        this.add.ellipse(0, 0, 48, 44, color),
+        this.add.circle(-18, 2, 6, color),
+        this.add.circle(18, -4, 6, color),
+        this.add.circle(-9, -16, 6, 0xffffff, 0.1),
+        this.add.image(0, 2, `face-${playerIndex}`).setDisplaySize(27, 27)
       ]);
-      root.chest = chest;
+      if (playerIndex === 1) {
+        head.add([
+          this.add.ellipse(-9, -14, 18, 12, 0x000000, 0).setStrokeStyle(3, 0x343238),
+          this.add.ellipse(9, -14, 18, 12, 0x000000, 0).setStrokeStyle(3, 0x343238),
+          this.add.rectangle(0, -14, 5, 3, 0x343238)
+        ]);
+      }
+      if (playerIndex === 3) {
+        head.add([
+          this.add.circle(-14, -18, 5, 0xe0b53c),
+          this.add.circle(-20, -14, 5, 0xe0b53c),
+          this.add.circle(-8, -14, 5, 0xe0b53c),
+          this.add.circle(-14, -9, 5, 0xe0b53c),
+          this.add.circle(-14, -14, 3, 0x9b7130)
+        ]);
+      }
+      if (playerIndex === 3) {
+        head.add([
+          this.add.triangle(-6, 22, -12, 0, 0, 7, 0, -7, 0xd9c6a4),
+          this.add.triangle(6, 22, 12, 0, 0, 7, 0, -7, 0xd9c6a4)
+        ]);
+      }
+      root.add([body, head]);
+      root.chest = body;
       root.head = head;
       return root.setScale(BASE_SCALE);
     }
@@ -538,7 +620,8 @@
         height: HEIGHT,
         backgroundColor: '#f5ead9',
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-        scene: { create }
+        physics: { default: 'matter', matter: { gravity: { y: 0.48 } } },
+        scene: { create, update }
       });
     }
   </script>

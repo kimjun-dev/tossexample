@@ -1,0 +1,22 @@
+{
+  "name": "8tosshackerton",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kimjun-dev/tossexample.git"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/kimjun-dev/tossexample/issues"
+  },
+  "homepage": "https://github.com/kimjun-dev/tossexample#readme",
+  "dependencies": {
+    "phaser": "^4.2.0"
+  }
+}
