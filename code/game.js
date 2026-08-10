@@ -4,9 +4,9 @@ import RAPIER from '@dimforge/rapier3d-compat';
 const WIDTH = 390;
 const HEIGHT = 844;
 const START_LINE_Y = 360;
-const FLOOR_Y = 1510;
+const FLOOR_Y = 1250;
 const WALL_Z = -5;
-const NAMES = ['플레이어 1', '플레이어 2', '플레이어 3', '플레이어 4'];
+const DEFAULT_NAMES = ['곰', '토끼', '고양이', '오리'];
 const KEYS = ['bear', 'rabbit', 'cat', 'duck'];
 const COLORS = [0xc6a27f, 0xeee7cf, 0x302e38, 0xf1cd58];
 const PAD_POINTS = [
@@ -21,18 +21,33 @@ const game = document.querySelector('#game');
 const guide = document.querySelector('#guide');
 const status = document.querySelector('#status');
 const errorBox = document.querySelector('#error');
+const setup = document.querySelector('#setup');
+const setupForm = document.querySelector('#setup-form');
+const setupSubmit = document.querySelector('#setup-submit');
+const setupDescription = document.querySelector('#setup-description');
+const nameInputs = [...setupForm.elements.namedItem('name')];
+const result = document.querySelector('#result');
+const resultTitle = document.querySelector('#result-title');
+const resultCopy = document.querySelector('#result-copy');
+const resultList = document.querySelector('#result-list');
 let world;
 let racers = [];
 let running = false;
 let finished = false;
 let cameraY = 0;
+let raceElapsed = 0;
+let raceStartedAt = 0;
+let mode = 'friends';
+let soundEnabled = true;
+let hapticEnabled = true;
+let audioContext;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf5ead9);
 const camera = new THREE.OrthographicCamera(-WIDTH / 2, WIDTH / 2, HEIGHT / 2, -HEIGHT / 2, 0.1, 1000);
 camera.position.set(0, 0, 500);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 game.prepend(renderer.domElement);
 
@@ -40,6 +55,25 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x756477, 2.2));
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
 keyLight.position.set(-160, 250, 300);
 scene.add(keyLight);
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function buzz(pattern) {
+  if (hapticEnabled) navigator.vibrate?.(pattern);
+}
+
+function tone(frequency = 440, duration = 0.08) {
+  if (!soundEnabled) return;
+  audioContext ||= new AudioContext();
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.05, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + duration);
+}
 
 function screenToWorldY(screenY) {
   return HEIGHT / 2 - screenY;
@@ -107,7 +141,7 @@ function makeFabricTexture() {
 }
 
 const fabricTexture = makeFabricTexture();
-const sphereGeometry = new THREE.SphereGeometry(1, 20, 14);
+const sphereGeometry = new THREE.SphereGeometry(1, 16, 10);
 
 function makeVisual(index, color) {
   const group = new THREE.Group();
@@ -221,7 +255,7 @@ function beginFlip(racer) {
   racer.gripElapsed = 0;
   racer.isFlipping = true;
   racer.body.setAngvel({
-    x: outwardDirection * (11 + Math.random()),
+    x: outwardDirection * (15 + Math.random() * 2),
     y: (Math.random() - 0.5) * 0.7,
     z: racer.flipDirection * (0.35 + Math.random() * 0.45)
   }, true);
@@ -236,7 +270,7 @@ function releaseExtraPad(racer) {
 function landOnNextPad(racer) {
   attachPad(racer, nextPad(racer));
   racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  racer.stickDuration = 0.28 + Math.random() * 0.12;
+  racer.stickDuration = 0.2 + Math.random() * 0.08;
   racer.gripElapsed = -racer.stickDuration;
   racer.isFlipping = false;
 }
@@ -248,9 +282,44 @@ function rotationSinceFlip(racer) {
   return 2 * Math.acos(Math.min(1, dot));
 }
 
+function createBodyColliders(index, body) {
+  const add = (hx, hy, hz, radius, x, y, angle = 0) => {
+    const rotation = { x: 0, y: 0, z: Math.sin(angle / 2), w: Math.cos(angle / 2) };
+    world.createCollider(
+      RAPIER.ColliderDesc.roundCuboid(hx, hy, hz, radius)
+        .setTranslation(x, y, 0)
+        .setRotation(rotation)
+        .setDensity(0.0007)
+        .setFriction(0.08)
+        .setRestitution(0),
+      body
+    );
+  };
+
+  // roundCuboid는 borderRadius만큼 모든 축으로 커지므로 hz + radius를
+  // 몸 중심과 벽 사이 거리(10)에 맞춰 벽 관통과 떨림을 막는다.
+  add(16, 22, 4, 6, 0, -3);
+  add(18, 16, 3, 7, 0, 25);
+  add(6, 16, 7, 3, -23, 13, 0.78);
+  add(6, 16, 7, 3, 23, 13, -0.78);
+  add(7, 14, 6.5, 3.5, -10, -30, -0.34);
+  add(7, 14, 6.5, 3.5, 10, -30, 0.34);
+
+  if (index === 0) {
+    add(6, 6, 7, 3, -14, 43);
+    add(6, 6, 7, 3, 14, 43);
+  } else if (index === 1) {
+    add(4, 12, 8, 2, -7, 45, -0.08);
+    add(4, 12, 8, 2, 7, 45, 0.08);
+  } else if (index === 2) {
+    add(5, 6, 7.5, 2.5, -12, 39, -0.25);
+    add(5, 6, 7.5, 2.5, 12, 39, 0.25);
+  }
+}
+
 function createRacer(index) {
   const x = -136.5 + index * 91;
-  const initialGrip = 0.45 + index * 0.14;
+  const initialGrip = 0.32 + Math.random() * 0.06;
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, screenToWorldY(150), 5)
@@ -258,13 +327,10 @@ function createRacer(index) {
       .setAngularDamping(0.7)
       .setAdditionalSolverIterations(8)
   );
-  world.createCollider(
-    RAPIER.ColliderDesc.ball(10).setDensity(0.01).setFriction(0.8).setRestitution(0.005),
-    body
-  );
+  createBodyColliders(index, body);
   const label = document.createElement('div');
   label.className = 'player-label';
-  label.textContent = NAMES[index];
+  label.textContent = DEFAULT_NAMES[index];
   game.append(label);
   const racer = {
     index,
@@ -277,7 +343,8 @@ function createRacer(index) {
     flipDirection: index % 2 ? -1 : 1,
     isFlipping: false,
     stickDuration: initialGrip,
-    placed: false
+    placed: false,
+    active: true
   };
   START_PADS[index].forEach((pad) => attachPad(racer, pad));
   body.setAngvel({ x: 0.12 * (index - 1.5), y: 0.08 * (1.5 - index), z: 0.05 * (index % 2 ? 1 : -1) }, true);
@@ -293,6 +360,39 @@ function placeRacer(racer, x, worldY) {
   START_PADS[racer.index].forEach((pad) => attachPad(racer, pad));
 }
 
+function resetRace() {
+  running = false;
+  finished = false;
+  raceElapsed = 0;
+  cameraY = 0;
+  camera.position.y = 0;
+  result.hidden = true;
+  const active = racers.filter((racer) => racer.active);
+  active.forEach((racer, index) => {
+    const spacing = 300 / active.length;
+    placeRacer(racer, -150 + spacing / 2 + spacing * index, screenToWorldY(150));
+    racer.placed = false;
+    racer.isFlipping = false;
+    racer.stickDuration = 0.32 + Math.random() * 0.06;
+    racer.gripElapsed = -racer.stickDuration;
+  });
+  status.textContent = '준비';
+  guide.textContent = '위치는 선택사항 · 레이스 시작';
+  guide.disabled = false;
+  guide.hidden = false;
+}
+
+function setParticipants(names) {
+  racers.forEach((racer, index) => {
+    racer.active = index < names.length;
+    racer.visual.visible = racer.active;
+    racer.label.hidden = !racer.active;
+    if (racer.active) racer.label.textContent = names[index];
+    else [...racer.anchors].forEach((anchor) => detachPad(racer, anchor));
+  });
+  resetRace();
+}
+
 function pointerWorld(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width - 0.5) * (camera.right - camera.left);
@@ -304,7 +404,7 @@ let draggedRacer = null;
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (running || finished) return;
   const point = pointerWorld(event);
-  draggedRacer = racers.reduce((closest, racer) => {
+  draggedRacer = racers.filter((racer) => racer.active).reduce((closest, racer) => {
     const position = racer.body.translation();
     const distance = Math.hypot(position.x - point.x, position.y - point.y);
     return distance < closest.distance ? { racer, distance } : closest;
@@ -321,7 +421,9 @@ renderer.domElement.addEventListener('pointercancel', () => { draggedRacer = nul
 
 function syncVisuals(dt) {
   let lowest = Infinity;
+  if (running) raceElapsed = (performance.now() - raceStartedAt) / 1000;
   racers.forEach((racer) => {
+    if (!racer.active) return;
     const position = racer.body.translation();
     const rotation = racer.body.rotation();
     racer.visual.position.set(position.x, position.y, position.z);
@@ -330,7 +432,7 @@ function syncVisuals(dt) {
     const squeeze = sticking ? Math.sin(Math.PI * (1 + racer.gripElapsed / racer.stickDuration)) * 0.08 : 0;
     racer.visual.scale.set(1 + squeeze * 0.45, 1 - squeeze * 0.35, 1 - squeeze);
     if (running) {
-      racer.gripElapsed += dt;
+      racer.gripElapsed += dt * (raceElapsed > 20 ? 1.55 : 1);
       const firstRelease = racer.anchors.length > 1 && racer.gripElapsed >= 0;
       const readyToFlip = racer.anchors.length === 1 && !racer.isFlipping && racer.gripElapsed >= 0;
       const flipAngle = racer.isFlipping ? rotationSinceFlip(racer) : 0;
@@ -362,15 +464,38 @@ function syncVisuals(dt) {
     const target = Math.min(0, lowest + 220);
     cameraY += (target - cameraY) * Math.min(1, dt * 3.2);
     camera.position.y = cameraY;
+    const progress = Math.max(0, Math.min(99, Math.round((screenToWorldY(150) - lowest) / (FLOOR_Y - 150) * 100)));
+    status.textContent = raceElapsed > 20 ? `막판 스퍼트 ${progress}%` : `진행 ${progress}%`;
+    if (raceElapsed >= 29 && !finished) {
+      const leader = racers.filter((racer) => racer.active)
+        .sort((a, b) => a.body.translation().y - b.body.translation().y)[0];
+      finishRace(leader);
+    }
   }
 }
 
 function finishRace(racer) {
   finished = true;
   running = false;
+  const ranking = racers.filter((item) => item.active)
+    .sort((a, b) => a.body.translation().y - b.body.translation().y);
   status.textContent = `${racer.label.textContent} 우승`;
-  guide.textContent = `${racer.label.textContent} 우승! 다시 하기`;
-  guide.hidden = false;
+  guide.hidden = true;
+  resultTitle.textContent = mode === 'choice'
+    ? `${racer.label.textContent}, 오늘은 너다`
+    : `${racer.label.textContent} 승!`;
+  const comments = mode === 'choice'
+    ? ['운명도 귀찮아서 먼저 떨어뜨렸어요.', '고민 끝. 끈끈이가 정했습니다.', '이 정도면 꽤 과학적인 결정이에요.']
+    : ['실력보다 접착력이 한 수 위였어요.', '이긴 사람도 조금 하찮아 보입니다.', '승부는 끝났고 품격도 같이 떨어졌어요.'];
+  resultCopy.textContent = comments[Math.floor(Math.random() * comments.length)];
+  resultList.replaceChildren(...ranking.map((item, index) => {
+    const row = document.createElement('li');
+    row.textContent = `${index + 1}위  ${item.label.textContent}`;
+    return row;
+  }));
+  result.hidden = false;
+  tone(660, 0.25);
+  buzz([60, 40, 100]);
 }
 
 function resize() {
@@ -384,14 +509,23 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-function startRace() {
-  if (finished) {
-    location.reload();
-    return;
+async function startRace() {
+  if (running || finished) return;
+  guide.disabled = true;
+  for (let count = 3; count > 0; count -= 1) {
+    guide.textContent = `${count}`;
+    tone(330 + count * 70);
+    await wait(550);
   }
+  guide.textContent = '출발!';
+  tone(700, 0.12);
+  buzz(40);
+  await wait(300);
+  raceElapsed = 0;
+  raceStartedAt = performance.now();
   running = true;
-  status.textContent = '경기 중';
   guide.hidden = true;
+  guide.disabled = false;
 }
 
 async function boot() {
@@ -399,10 +533,12 @@ async function boot() {
   world = new RAPIER.World({ x: 0, y: -520, z: 0 });
   world.timestep = 1 / 60;
   const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, screenToWorldY(800), WALL_Z - 2));
-  world.createCollider(RAPIER.ColliderDesc.cuboid(WIDTH / 2, 850, 2).setFriction(0.8).setRestitution(0), wallBody);
+  world.createCollider(RAPIER.ColliderDesc.cuboid(WIDTH / 2, 850, 2).setFriction(0.08).setRestitution(0), wallBody);
   makeWall();
   racers = KEYS.map((_, index) => createRacer(index));
   resize();
+  setupSubmit.disabled = false;
+  setupSubmit.textContent = '찰싹 붙이러 가기';
 
   let previous = performance.now();
   let accumulator = 0;
@@ -424,6 +560,42 @@ async function boot() {
 }
 
 guide.addEventListener('click', startRace);
+setupForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const names = nameInputs.map((input) => input.value.trim()).filter(Boolean);
+  if (names.length < 2) {
+    nameInputs.find((input) => !input.value.trim())?.focus();
+    return;
+  }
+  soundEnabled = document.querySelector('#sound-toggle').checked;
+  hapticEnabled = document.querySelector('#haptic-toggle').checked;
+  setParticipants(names);
+  setup.hidden = true;
+  tone(420);
+});
+document.querySelectorAll('[data-mode]').forEach((button) => {
+  button.addEventListener('click', () => {
+    mode = button.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach((item) => {
+      item.setAttribute('aria-pressed', String(item === button));
+    });
+    const choiceMode = mode === 'choice';
+    setupDescription.textContent = choiceMode
+      ? '고민되는 선택지를 2~4개 적어주세요.'
+      : '친구 이름만 적으면 끈끈이들이 알아서 승부해요.';
+    nameInputs.forEach((input, index) => {
+      input.placeholder = `${index + 1}번째 ${choiceMode ? '선택지' : '이름'}${index > 1 ? ' (선택)' : ''}`;
+    });
+  });
+});
+document.querySelector('#replay').addEventListener('click', () => {
+  resetRace();
+  startRace();
+});
+document.querySelector('#edit-players').addEventListener('click', () => {
+  result.hidden = true;
+  setup.hidden = false;
+});
 addEventListener('resize', resize);
 boot().catch((error) => {
   console.error(error);

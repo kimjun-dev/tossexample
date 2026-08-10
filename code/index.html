@@ -12,8 +12,27 @@
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     #hud { position: absolute; inset: max(16px, env(safe-area-inset-top)) 16px auto; z-index: 2; display: flex; justify-content: space-between; pointer-events: none; color: #4a3f51; font-weight: 900; text-shadow: 0 2px 0 #fff8; }
     #guide { position: absolute; z-index: 3; left: 50%; bottom: max(52px, calc(env(safe-area-inset-bottom) + 28px)); transform: translateX(-50%); width: max-content; max-width: 86%; padding: 13px 22px; border: 0; border-radius: 999px; background: #fff4b8; color: #44374b; box-shadow: 0 8px 24px #4c3b4f33; font: 800 15px/1.35 inherit; cursor: pointer; }
+    button, input { font: inherit; }
+    button { touch-action: manipulation; }
+    button:disabled { opacity: .55; cursor: wait; }
     .player-label { position: absolute; z-index: 2; transform: translate(-50%, -100%); color: #4a3f51; font-size: 13px; font-weight: 900; white-space: nowrap; text-shadow: 0 2px 2px #fff, 0 0 4px #fff; pointer-events: none; }
     #error { position: absolute; inset: 0; z-index: 5; display: none; place-items: center; padding: 28px; color: white; background: #211d2b; text-align: center; }
+    [hidden] { display: none !important; }
+    .overlay { position: absolute; inset: 0; z-index: 4; display: grid; align-items: end; padding: 24px 20px max(24px, env(safe-area-inset-bottom)); background: linear-gradient(#211d2b55, #211d2bcc); }
+    .card { width: 100%; padding: 24px; border-radius: 28px; background: #fffaf1; color: #44374b; box-shadow: 0 16px 48px #211d2b55; }
+    .card h1, .card h2 { margin: 0 0 8px; font-size: 26px; }
+    .card p { margin: 0 0 18px; color: #746979; line-height: 1.45; }
+    .mode-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .mode-picker button, .secondary { padding: 11px; border: 0; border-radius: 14px; background: #eee7dc; color: #63576a; font-weight: 800; }
+    .mode-picker button[aria-pressed="true"] { background: #44374b; color: white; }
+    #name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #name-fields input { min-width: 0; padding: 12px; border: 1px solid #ded4c7; border-radius: 13px; background: white; color: #44374b; outline: none; }
+    #name-fields input:focus { border-color: #76677d; box-shadow: 0 0 0 3px #76677d22; }
+    .settings { display: flex; gap: 18px; margin: 16px 2px; font-size: 14px; font-weight: 700; }
+    .primary { width: 100%; padding: 14px; border: 0; border-radius: 16px; background: #44374b; color: white; font-weight: 900; }
+    #result-list { margin: 18px 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+    #result-list li { padding: 11px 14px; border-radius: 13px; background: #f2eadf; font-weight: 800; }
+    .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
   </style>
 </head>
 <body>
@@ -21,6 +40,38 @@
     <div id="hud"><span>찰싹 레이스</span><span id="status">준비</span></div>
     <button id="guide" type="button">캐릭터를 드래그해 배치한 뒤 시작</button>
     <div id="error">게임을 불러오지 못했어요.<br />화면을 새로고침해 주세요.</div>
+    <section id="setup" class="overlay" aria-labelledby="setup-title">
+      <form id="setup-form" class="card">
+        <h1 id="setup-title">누가 먼저 떨어질까?</h1>
+        <p id="setup-description">이름만 적으면 끈끈이들이 알아서 승부해요.</p>
+        <div class="mode-picker" aria-label="게임 모드">
+          <button type="button" data-mode="friends" aria-pressed="true">친구 내기</button>
+          <button type="button" data-mode="choice" aria-pressed="false">혼자 결정</button>
+        </div>
+        <div id="name-fields">
+          <input name="name" maxlength="10" placeholder="첫 번째 이름" aria-label="첫 번째 참가자" required />
+          <input name="name" maxlength="10" placeholder="두 번째 이름" aria-label="두 번째 참가자" required />
+          <input name="name" maxlength="10" placeholder="세 번째 이름 (선택)" aria-label="세 번째 참가자" />
+          <input name="name" maxlength="10" placeholder="네 번째 이름 (선택)" aria-label="네 번째 참가자" />
+        </div>
+        <div class="settings">
+          <label><input id="sound-toggle" type="checkbox" checked /> 소리</label>
+          <label><input id="haptic-toggle" type="checkbox" checked /> 진동</label>
+        </div>
+        <button id="setup-submit" class="primary" type="submit" disabled>게임 준비 중</button>
+      </form>
+    </section>
+    <section id="result" class="overlay" aria-labelledby="result-title" hidden>
+      <div class="card">
+        <h2 id="result-title"></h2>
+        <p id="result-copy"></p>
+        <ol id="result-list"></ol>
+        <div class="actions">
+          <button id="edit-players" class="secondary" type="button">이름 변경</button>
+          <button id="replay" class="primary" type="button">한 판 더</button>
+        </div>
+      </div>
+    </section>
   </main>
   <script type="module" src="./game.js"></script>
 </body>

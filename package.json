@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "build:ait": "vite build && ait build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "npm run build"
+    "test": "npm run build",
+    "deploy": "ait deploy"
   },
   "repository": {
     "type": "git",
@@ -19,6 +21,7 @@
   },
   "homepage": "https://github.com/kimjun-dev/tossexample#readme",
   "dependencies": {
+    "@apps-in-toss/web-framework": "^3.0.3",
     "@dimforge/rapier3d-compat": "^0.20.0",
     "three": "^0.185.1"
   },
