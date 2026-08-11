@@ -23,6 +23,7 @@
   "dependencies": {
     "@apps-in-toss/web-framework": "^3.0.3",
     "@dimforge/rapier3d-compat": "^0.20.0",
+    "gsap": "^3.15.0",
     "three": "^0.185.1"
   },
   "devDependencies": {
