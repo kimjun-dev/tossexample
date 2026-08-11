@@ -52,15 +52,11 @@ const setupDescription = document.querySelector('#setup-description');
 const decisionQuestion = document.querySelector('#decision-question');
 const nameInputs = [...setupForm.elements.namedItem('name')];
 const characterSelects = [...setupForm.elements.namedItem('character')];
-const characterTriggers = [...document.querySelectorAll('.character-trigger')];
-const characterPicker = document.querySelector('#character-picker');
-const characterStage = document.querySelector('#character-stage');
-const characterTrack = document.querySelector('#character-track');
-const characterClose = document.querySelector('#character-close');
-const characterPrev = document.querySelector('#character-prev');
-const characterNext = document.querySelector('#character-next');
-const characterConfirm = document.querySelector('#character-confirm');
-const selectedCharacterName = document.querySelector('#selected-character-name');
+const participants = [...document.querySelectorAll('.participant')];
+const characterPickers = [...document.querySelectorAll('.mini-character-picker')];
+const characterPreviewImages = [...document.querySelectorAll('.mini-character-preview img')];
+const characterPreviewLabels = [...document.querySelectorAll('.mini-character-preview span')];
+const characterSteps = [...document.querySelectorAll('.character-step')];
 const result = document.querySelector('#result');
 const resultTitle = document.querySelector('#result-title');
 const resultCopy = document.querySelector('#result-copy');
@@ -83,9 +79,7 @@ let hapticEnabled = true;
 let audioContext;
 let resultComments = [];
 let commentIndex = 0;
-let activeCharacterIndex = -1;
-let characterCards = [];
-let characterCursor = 0;
+let characterPreviews = {};
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8de8ee);
@@ -532,6 +526,10 @@ function detachPad(racer, anchor) {
   racer.anchors.splice(racer.anchors.indexOf(anchor), 1);
 }
 
+function anchorProgressY(racer) {
+  return Math.min(...racer.anchors.map((anchor) => anchor.anchorBody.translation().y));
+}
+
 function nextPad(racer) {
   const occupied = new Set(racer.anchors.map((anchor) => anchor.padIndex));
   const anchor = racer.anchors[0].anchorBody.translation();
@@ -636,6 +634,7 @@ function createRacer(index) {
     active: true
   };
   START_PADS[index].forEach((pad) => attachPad(racer, pad));
+  racer.lastProgressY = anchorProgressY(racer);
   body.setAngvel({ x: 0, y: 0, z: 0.05 * (index % 2 ? 1 : -1) }, true);
   return racer;
 }
@@ -647,6 +646,18 @@ function placeRacer(racer, x, worldY) {
   racer.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
   racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   START_PADS[racer.index].forEach((pad) => attachPad(racer, pad));
+  racer.lastProgressY = anchorProgressY(racer);
+}
+
+function recoverStalledRacer(racer) {
+  const position = racer.body.translation();
+  const y = position.y - 72;
+  placeRacer(racer, THREE.MathUtils.clamp(position.x, -EDGE_SOFT_LIMIT, EDGE_SOFT_LIMIT), y);
+  racer.isFlipping = false;
+  racer.stickDuration = 0.18;
+  racer.gripElapsed = -racer.stickDuration;
+  racer.stalledFor = 0;
+  console.assert(racer.anchors.length === START_PADS[racer.index].length, 'stalled racer recovery failed');
 }
 
 function resetRace() {
@@ -664,7 +675,6 @@ function resetRace() {
     racer.isFlipping = false;
     racer.stickDuration = 0.32 + Math.random() * 0.06;
     racer.gripElapsed = -racer.stickDuration;
-    racer.lastProgressY = racer.body.translation().y;
     racer.stalledFor = 0;
   });
   status.textContent = '준비';
@@ -805,15 +815,13 @@ function syncVisuals(dt) {
       accents.forEach((shell) => { shell.rotation.z += Math.sin(characterMotion * 2.4) * 0.04; });
     }
     if (running) {
-      if (position.y < racer.lastProgressY - 4) {
-        racer.lastProgressY = position.y;
+      const progressY = anchorProgressY(racer);
+      if (progressY < racer.lastProgressY - 18) {
+        racer.lastProgressY = progressY;
         racer.stalledFor = 0;
       } else racer.stalledFor += dt;
-      if (racer.stalledFor > 3 && position.y < screenToWorldY(START_LINE_Y + 70)) {
-        const mass = racer.body.mass();
-        racer.body.applyImpulse({ x: -Math.sign(position.x) * mass * 8, y: -mass * 24, z: mass * 18 }, true);
-        racer.gripElapsed += 0.3;
-        racer.stalledFor = 0;
+      if (racer.stalledFor > 2.5 && raceElapsed > 4) {
+        recoverStalledRacer(racer);
       }
       racer.gripElapsed += dt * (raceElapsed > RACE_RUSH_TIME ? 1.55 : 1);
       const firstRelease = racer.anchors.length > 1 && racer.gripElapsed >= 0;
@@ -960,12 +968,12 @@ async function boot() {
   }
   makeWall();
   racers = KEYS.map((_, index) => createRacer(index));
-  const previews = renderCharacterPreviews();
-  characterCards.forEach((card) => { card.querySelector('img').src = previews[card.dataset.character]; });
+  characterPreviews = renderCharacterPreviews();
+  syncCharacterOptions();
   resize();
   setupSubmit.disabled = false;
   setupSubmit.textContent = '찰싹 붙이러 가기';
-  gsap.from('#setup .card', { y: 36, opacity: 0, rotation: -1.5, duration: 0.7 * motionScale, ease: 'power3.out' });
+  gsap.from('#setup-form', { opacity: 0, duration: 0.5 * motionScale, ease: 'power2.out' });
   gsap.from('.hero-title img', { scale: 0.8, opacity: 0.2, duration: 0.8 * motionScale, ease: 'back.out(1.6)' });
   revealText(setupDescription);
   if (motionScale) gsap.to('.story-marquee-track', { xPercent: -50, duration: 22, repeat: -1, ease: 'none' });
@@ -1051,6 +1059,7 @@ document.querySelectorAll('[data-mode]').forEach((button) => {
     setupSubmit.textContent = choiceMode ? '중력에게 결정 맡기기' : '찰싹 붙이러 가기';
     document.querySelector('#edit-players').textContent = choiceMode ? '선택지 변경' : '이름 변경';
     document.querySelector('#replay').textContent = choiceMode ? '다시 결정' : '한 판 더';
+    syncCharacterOptions();
   });
 });
 function syncCharacterOptions() {
@@ -1064,34 +1073,12 @@ function syncCharacterOptions() {
   characterSelects.forEach((select, index) => {
     const used = new Set(characterSelects.filter((_, otherIndex) => otherIndex !== index && active[otherIndex]).map((item) => item.value));
     [...select.options].forEach((option) => { option.disabled = used.has(option.value); });
-    characterTriggers[index].disabled = !active[index];
-    characterTriggers[index].textContent = active[index] ? CHARACTER_NAMES[select.value] : '이름 입력 후 선택';
+    const disabled = mode === 'choice' || !active[index];
+    characterPickers[index].setAttribute('aria-disabled', String(disabled));
+    characterPickers[index].querySelectorAll('button').forEach((button) => { button.disabled = disabled; });
+    characterPreviewLabels[index].textContent = active[index] ? CHARACTER_NAMES[select.value] : '이름 입력 후 선택';
+    if (characterPreviews[select.value]) characterPreviewImages[index].src = characterPreviews[select.value];
   });
-  if (activeCharacterIndex >= 0) updateCharacterCarousel();
-}
-function availableCharacterKeys() {
-  return [...characterSelects[activeCharacterIndex].options]
-    .filter((option) => !option.disabled || option.selected)
-    .map((option) => option.value);
-}
-function updateCharacterCarousel(direction = 0) {
-  const available = availableCharacterKeys();
-  characterCursor = (characterCursor + direction + available.length) % available.length;
-  characterCards.forEach((card) => {
-    card.dataset.position = 'hidden';
-    card.disabled = !available.includes(card.dataset.character);
-    card.setAttribute('aria-pressed', 'false');
-  });
-  const current = characterCards.find((card) => card.dataset.character === available[characterCursor]);
-  const next = characterCards.find((card) => card.dataset.character === available[(characterCursor + 1) % available.length]);
-  const previous = characterCards.find((card) => card.dataset.character === available[(characterCursor - 1 + available.length) % available.length]);
-  current.dataset.position = 'current';
-  current.setAttribute('aria-pressed', 'true');
-  if (available.length > 1) next.dataset.position = 'next';
-  if (available.length > 2) previous.dataset.position = 'prev';
-  selectedCharacterName.textContent = CHARACTER_NAMES[available[characterCursor]];
-  characterPrev.disabled = characterNext.disabled = available.length < 2;
-  gsap.fromTo(current.querySelector('img'), { scale: 0.82, opacity: 0.45 }, { scale: 1, opacity: 1, duration: 0.38 * motionScale, ease: 'back.out(1.7)' });
 }
 characterSelects.forEach((select, index) => {
   select.replaceChildren(...CHARACTER_KEYS.map((key) => {
@@ -1103,58 +1090,15 @@ characterSelects.forEach((select, index) => {
   select.value = KEYS[index];
   select.addEventListener('change', syncCharacterOptions);
 });
-characterCards = CHARACTER_KEYS.map((key) => {
-  const card = document.createElement('button');
-  const image = document.createElement('img');
-  const name = document.createElement('span');
-  card.type = 'button';
-  card.className = 'character-card';
-  card.dataset.character = key;
-  image.alt = '';
-  name.textContent = CHARACTER_NAMES[key];
-  card.append(image, name);
-  card.addEventListener('click', () => {
-    const available = availableCharacterKeys();
-    characterCursor = available.indexOf(key);
-    updateCharacterCarousel();
-  });
-  characterTrack.append(card);
-  return card;
-});
-characterTriggers.forEach((trigger, index) => trigger.addEventListener('click', () => {
-  activeCharacterIndex = index;
+characterSteps.forEach((button) => button.addEventListener('click', () => {
+  const index = participants.indexOf(button.closest('.participant'));
+  const select = characterSelects[index];
+  const available = [...select.options].filter((option) => !option.disabled || option.selected).map((option) => option.value);
+  const next = (available.indexOf(select.value) + Number(button.dataset.direction) + available.length) % available.length;
+  select.value = available[next];
   syncCharacterOptions();
-  characterCursor = availableCharacterKeys().indexOf(characterSelects[index].value);
-  updateCharacterCarousel();
-  characterPicker.hidden = false;
-  gsap.fromTo('.character-dialog', { y: 36, scale: 0.96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.4 * motionScale, ease: 'power3.out' });
-  characterConfirm.focus();
+  gsap.fromTo(characterPreviewImages[index], { x: Number(button.dataset.direction) * 18, opacity: 0.25 }, { x: 0, opacity: 1, duration: 0.25 * motionScale });
 }));
-characterPrev.addEventListener('click', () => updateCharacterCarousel(-1));
-characterNext.addEventListener('click', () => updateCharacterCarousel(1));
-characterConfirm.addEventListener('click', () => {
-  characterSelects[activeCharacterIndex].value = availableCharacterKeys()[characterCursor];
-  syncCharacterOptions();
-  closeCharacterPicker();
-});
-let pickerPointerX = 0;
-characterStage.addEventListener('pointerdown', (event) => { pickerPointerX = event.clientX; });
-characterStage.addEventListener('pointerup', (event) => {
-  const distance = event.clientX - pickerPointerX;
-  if (Math.abs(distance) > 35) updateCharacterCarousel(distance > 0 ? -1 : 1);
-});
-function closeCharacterPicker() {
-  characterPicker.hidden = true;
-  characterTriggers[activeCharacterIndex]?.focus();
-  activeCharacterIndex = -1;
-}
-characterClose.addEventListener('click', closeCharacterPicker);
-addEventListener('keydown', (event) => {
-  if (characterPicker.hidden) return;
-  if (event.key === 'Escape') closeCharacterPicker();
-  else if (event.key === 'ArrowLeft') updateCharacterCarousel(-1);
-  else if (event.key === 'ArrowRight') updateCharacterCarousel(1);
-});
 nameInputs.forEach((input) => input.addEventListener('input', syncCharacterOptions));
 syncCharacterOptions();
 document.querySelector('#replay').addEventListener('click', () => {

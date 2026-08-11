@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>찰싹 레이스</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
     :root { color-scheme: light; --ink: #183b32; --forest: #245444; --moss: #89a778; --cream: #fbf5df; --paper: #f3e9c9; --carrot: #df7040; --sun: #f0c667; }
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #39291f; }
@@ -18,7 +19,7 @@
     #race-timer { grid-column: 1 / -1; font: 900 22px/1 monospace; letter-spacing: -.05em; text-align: right; }
     #guide { position: absolute; z-index: 3; left: 50%; bottom: max(46px, calc(env(safe-area-inset-bottom) + 24px)); transform: translateX(-50%); width: max-content; max-width: 88%; padding: 14px 20px 16px; border: 1px solid #17392f; border-radius: 4px 14px 4px 14px; color: var(--cream); background: var(--forest); box-shadow: 5px 6px 0 #df7040, 0 14px 30px #183b3238; font: 800 15px/1.35 inherit; cursor: pointer; transition: transform .25s ease, background .25s ease; }
     #guide:active { transform: translateX(-50%) scale(.97); }
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
     button { touch-action: manipulation; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
     .player-label { position: absolute; z-index: 3; transform: translate(-50%, -100%) rotate(-1deg); padding: 5px 9px; border: 1px solid #183b3266; border-radius: 3px 8px 3px 8px; color: var(--ink); background: #fff8dfeb; font-family: Georgia, "Noto Serif KR", serif; font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: 2px 3px 0 #df704033; pointer-events: none; }
@@ -49,33 +50,14 @@
     #name-fields input, #name-fields select { min-width: 0; width: 100%; border: 0; border-radius: 0; color: var(--ink); background: #fffbd5; outline: none; }
     #name-fields input { padding: 12px 11px 7px; }
     #name-fields select { display: none; }
-    .character-trigger { padding: 3px 10px 9px; border: 0; color: #28704a; background: transparent; text-align: left; font-size: 12px; font-weight: 900; }
-    .character-trigger::after { float: right; content: "캐릭터 선택"; color: #2489a7; font-size: 10px; }
-    .character-trigger:disabled::after { content: ""; }
+    .mini-character-picker { height: 106px; display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; gap: 2px; padding: 4px; border-top: 2px solid var(--ink); background: var(--paper); }
+    .mini-character-picker button { width: 28px; height: 42px; padding: 0; border: 2px solid var(--ink); border-radius: 5px; color: var(--cream); background: var(--carrot); box-shadow: 2px 2px 0 var(--ink); font-size: 20px; }
+    .mini-character-preview { min-width: 0; height: 96px; display: grid; place-items: center; grid-template-rows: 74px 18px; font-size: 12px; }
+    .mini-character-preview img { width: 100%; height: 74px; object-fit: contain; }
+    .mini-character-picker[aria-disabled="true"] { opacity: .35; }
     #name-fields select option:disabled { color: #aaa; }
     #name-fields input:focus { position: relative; z-index: 1; box-shadow: inset 0 0 0 2px var(--carrot); }
-    #game[data-mode="choice"] .character-trigger { display: none; }
-    #character-picker { position: absolute; inset: 0; z-index: 10; padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom)); color: var(--ink); background: #69d7e5f5; backdrop-filter: blur(10px); }
-    #character-picker[hidden] { display: none; }
-    .character-dialog { height: 100%; display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; padding: 18px; border: 4px solid var(--forest); border-radius: 28px; background: #fffbd5; box-shadow: 0 8px 0 #1f603c; }
-    .character-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .character-dialog h2 { margin: 0; font-size: 29px; line-height: 1; letter-spacing: -.05em; }
-    .character-dialog p { margin: 0; color: #327056; font-size: 13px; }
-    #character-close { padding: 8px 11px; border: 3px solid var(--forest); border-radius: 12px; color: var(--ink); background: #fff3a7; font-weight: 900; }
-    #character-stage { position: relative; min-height: 0; overflow: hidden; border-block: 3px solid #8fbd54; perspective: 700px; touch-action: pan-y; }
-    #character-track { position: absolute; inset: 0 34px; }
-    .character-card { position: absolute; top: 5%; left: 50%; width: 72%; height: 90%; display: grid; place-items: center; align-content: center; gap: 8px; overflow: hidden; border: 4px solid var(--forest); border-radius: 26px; color: var(--ink); background: #dff6d8; box-shadow: 0 7px 0 #1f603c; font-size: 20px; font-weight: 950; opacity: 0; pointer-events: none; transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .35s ease, filter .35s ease; }
-    .character-card img { width: 100%; height: min(39vh, 330px); object-fit: contain; }
-    .character-card[data-position="current"] { z-index: 3; opacity: 1; pointer-events: auto; transform: translateX(-50%) scale(1); }
-    .character-card[data-position="prev"] { z-index: 2; opacity: .48; pointer-events: auto; filter: saturate(.7); transform: translateX(-118%) scale(.68) rotateY(14deg); }
-    .character-card[data-position="next"] { z-index: 2; opacity: .48; pointer-events: auto; filter: saturate(.7); transform: translateX(18%) scale(.68) rotateY(-14deg); }
-    .character-card[data-position="hidden"] { transform: translateX(-50%) scale(.45); }
-    .carousel-arrow { position: absolute; top: 50%; z-index: 5; width: 44px; height: 58px; transform: translateY(-50%); border: 3px solid var(--forest); border-radius: 15px; color: #fffbd5; background: #f15b2a; box-shadow: 0 4px 0 #a93b1c; font-size: 28px; font-weight: 950; }
-    #character-prev { left: 0; }
-    #character-next { right: 0; }
-    .character-confirm { display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 9px; }
-    #selected-character-name { padding-left: 8px; font-size: 24px; letter-spacing: -.04em; }
-    #character-confirm { padding: 13px; border: 3px solid #205d3c; border-radius: 16px; color: #fffbd5; background: #f15b2a; box-shadow: 0 5px 0 #a93b1c; font-weight: 950; }
+    #game[data-mode="choice"] .mini-character-picker { display: none; }
     #decision-question { display: none; width: 100%; margin-bottom: 9px; padding: 13px 14px; border: 3px solid var(--forest); border-radius: 15px; color: var(--ink); background: #dff6ff; outline: none; box-shadow: 0 4px 0 #1f603c; }
     #game[data-mode="choice"] #decision-question { display: block; }
     #game[data-mode="choice"] .card { background: #eaf9df; }
@@ -102,33 +84,44 @@
     #result-list li:nth-child(even) { transform: rotate(.4deg); }
     #result-list li:first-child { position: relative; z-index: 2; color: var(--cream); background: var(--carrot); transform: rotate(-.5deg); }
     .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
-    :root { --ink: #22543d; --forest: #2d7b4b; --cream: #fffbd5; --paper: #fff3a7; --carrot: #f15b2a; --sun: #ffd83d; }
-    html, body { background: #69d7e5; }
-    body { font-family: Outfit, "Arial Rounded MT Bold", Pretendard, system-ui, sans-serif; background: #69d7e5; }
-    #game { border: 0; background: #8de8ee; box-shadow: 0 0 0 6px #2d7b4b, 8px 0 0 #f15b2a; }
+    :root { --ink: #202020; --forest: #16804c; --cream: #fffceb; --paper: #ffe66a; --carrot: #ff5b45; --sun: #ffd83d; }
+    html, body { background: #ffdf43; }
+    body { font-family: "Jua", "Arial Rounded MT Bold", Pretendard, system-ui, sans-serif; background-color: #ffdf43; background-image: linear-gradient(90deg, #ffffff55 50%, transparent 50%), linear-gradient(#ffffff55 50%, transparent 50%); background-size: 28px 28px; }
+    #game { border: 4px solid var(--ink); background: #67ddeb; box-shadow: 9px 9px 0 #1671d9; }
     #game::after { display: none; }
-    #hud { border: 3px solid var(--forest); border-radius: 18px; background: #fffbd5; box-shadow: 0 5px 0 #1f603c; backdrop-filter: none; }
-    #hud > span:first-child { font-family: inherit; letter-spacing: -.03em; }
-    #status { border-radius: 12px; background: var(--carrot); }
-    #guide { border: 3px solid #205d3c; border-radius: 18px; background: var(--carrot); box-shadow: 0 6px 0 #a93b1c; }
-    .player-label { border: 2px solid var(--forest); border-radius: 12px; background: #fffbd5; box-shadow: 0 3px 0 #1f603c55; font-family: inherit; }
-    .overlay { background: linear-gradient(#63dce733, #4d9d52aa); }
-    .card { padding: 22px; border: 4px solid var(--forest); border-radius: 26px; background: #fffbd5; box-shadow: 0 8px 0 #1f603c, 0 18px 30px #18502d44; }
+    #hud { border: 3px solid var(--ink); border-radius: 7px; background: var(--paper); box-shadow: 4px 4px 0 var(--ink); backdrop-filter: none; transform: rotate(-.5deg); }
+    #hud > span:first-child { font-family: inherit; letter-spacing: 0; }
+    #status { border: 2px solid var(--ink); border-radius: 999px; background: var(--carrot); transform: rotate(3deg); }
+    #guide { border: 3px solid var(--ink); border-radius: 8px; background: var(--carrot); box-shadow: 5px 5px 0 var(--ink); transform: translateX(-50%) rotate(-1deg); }
+    #guide:active { transform: translateX(-50%) rotate(-1deg) translate(3px, 3px); box-shadow: 2px 2px 0 var(--ink); }
+    .player-label { border: 2px solid var(--ink); border-radius: 5px; background: var(--paper); box-shadow: 2px 2px 0 var(--ink); font-family: inherit; }
+    .overlay { background: #16804c99; }
+    #setup { display: block; padding: 0; overflow-x: hidden; overflow-y: auto; background: var(--cream); }
+    .setup-page { position: relative; width: 100%; min-height: 100%; display: flex; flex-direction: column; padding: max(22px, env(safe-area-inset-top)) 22px max(22px, env(safe-area-inset-bottom)); color: var(--ink); background: var(--cream); }
+    .setup-page > p { margin: 0 0 18px; color: #4f6b60; line-height: 1.45; }
+    .setup-page .story-marquee { margin: calc(-1 * max(22px, env(safe-area-inset-top))) -22px 22px; }
+    .setup-page .settings { margin-top: auto; }
+    .card { padding: 22px; border: 4px solid var(--ink); border-radius: 9px; background: var(--cream); box-shadow: 8px 8px 0 var(--ink); transform: rotate(.35deg); }
     .card::before, .card::after { display: none; }
-    .story-marquee { margin: -22px -22px 18px; border-bottom: 3px solid #a93b1c; background: var(--carrot); font-family: inherit; letter-spacing: .05em; }
-    .hero-title, .card h2 { font-family: inherit; line-height: 1; text-decoration: none; }
-    .hero-title img { border: 3px solid var(--forest); background: #8de8ee; filter: saturate(1.1); }
-    .turtle-mark { opacity: .24; }
-    .mode-picker button, .secondary { border: 3px solid var(--forest); border-radius: 15px; background: #fff3a7; box-shadow: 0 4px 0 #1f603c; }
-    .mode-picker button[aria-pressed="true"] { color: #fffbd5; background: var(--forest); }
-    #name-fields { gap: 3px; border: 3px solid var(--forest); border-radius: 17px; background: var(--forest); box-shadow: 0 4px 0 #1f603c; }
-    #name-fields input { background: #fffbd5; }
+    .story-marquee { margin: -22px -22px 18px; border-bottom: 4px solid var(--ink); background: var(--carrot); font-family: inherit; letter-spacing: 0; }
+    .hero-title, .card h2 { font-family: inherit; line-height: 1.05; letter-spacing: 0; text-decoration: none; }
+    .hero-title img { border: 3px solid var(--ink); border-radius: 4px; background: #67ddeb; filter: saturate(1.2); transform: rotate(5deg); }
+    .turtle-mark { opacity: .32; }
+    .mode-picker button, .secondary { border: 3px solid var(--ink); border-radius: 7px; background: var(--paper); box-shadow: 3px 3px 0 var(--ink); }
+    .mode-picker button:first-child { transform: rotate(-1deg); }
+    .mode-picker button:last-child { transform: rotate(1deg); }
+    .mode-picker button[aria-pressed="true"] { color: var(--cream); background: #1671d9; }
+    #name-fields { gap: 3px; border: 3px solid var(--ink); border-radius: 7px; background: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
+    #name-fields input { background: var(--cream); }
     .settings { color: var(--ink); }
-    .primary { border: 3px solid #205d3c; border-radius: 16px; background: var(--carrot); box-shadow: 0 5px 0 #a93b1c; }
-    .feedback-carousel { border-block: 3px solid #8fbd54; }
-    #result-list li { border: 3px solid var(--forest); background: #fff3a7; box-shadow: 0 3px 0 #1f603c; font-family: inherit; }
+    .primary { border: 3px solid var(--ink); border-radius: 7px; background: var(--carrot); box-shadow: 4px 4px 0 var(--ink); }
+    .feedback-carousel { border-block: 3px dashed var(--ink); }
+    #result-list li { border: 3px solid var(--ink); background: var(--paper); box-shadow: 3px 3px 0 var(--ink); font-family: inherit; }
     #result-list li:first-child { background: var(--carrot); }
-    @media (hover: hover) { button:hover { transform: translateY(-2px); } .mode-picker button:hover { background: #f8efcf; } .mode-picker button[aria-pressed="true"]:hover { background: #193d32; } }
+    #decision-question { border-color: var(--ink); border-radius: 7px; box-shadow: 4px 4px 0 var(--ink); }
+    .start-board { border-color: var(--ink); border-radius: 9px; background: #1671d9; box-shadow: 7px 7px 0 var(--ink); transform: rotate(-1deg); }
+    .signal-lights i { border-color: var(--ink); }
+    @media (hover: hover) { button:hover { filter: brightness(1.08); } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
   </style>
 </head>
@@ -139,7 +132,7 @@
     <div id="race-start" aria-live="assertive" hidden><div class="start-board"><div class="signal-lights" aria-hidden="true"><i></i><i></i><i></i></div><div id="start-count">3</div><div id="start-caption">출발 준비</div></div></div>
     <div id="error">게임을 불러오지 못했어요.<br />화면을 새로고침해 주세요.</div>
     <section id="setup" class="overlay" aria-labelledby="setup-title">
-      <form id="setup-form" class="card">
+      <form id="setup-form" class="setup-page">
         <div class="story-marquee" aria-hidden="true"><div class="story-marquee-track"><span>천천히 가도 먼저 닿으면 우승</span><span>서두르지 않아도 레이스는 계속된다</span><span>천천히 가도 먼저 닿으면 우승</span><span>서두르지 않아도 레이스는 계속된다</span></div></div>
         <div class="turtle-mark" aria-hidden="true"></div>
         <h1 id="setup-title" class="hero-title"><span>느려도 괜찮아</span><span>먼저 닿으면 우승 <img src="./assets/characters/rabbit.png" alt="" /></span></h1>
@@ -150,10 +143,10 @@
         </div>
         <input id="decision-question" maxlength="30" placeholder="무엇을 결정할까요?" aria-label="결정할 질문" />
         <div id="name-fields">
-          <div class="participant"><input name="name" maxlength="10" placeholder="첫 번째 이름" aria-label="첫 번째 참가자" required /><select name="character" aria-label="첫 번째 캐릭터"></select><button class="character-trigger" type="button">곰</button></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="두 번째 이름" aria-label="두 번째 참가자" required /><select name="character" aria-label="두 번째 캐릭터"></select><button class="character-trigger" type="button">토끼</button></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="세 번째 이름 (선택)" aria-label="세 번째 참가자" /><select name="character" aria-label="세 번째 캐릭터"></select><button class="character-trigger" type="button">고양이</button></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="네 번째 이름 (선택)" aria-label="네 번째 참가자" /><select name="character" aria-label="네 번째 캐릭터"></select><button class="character-trigger" type="button">오리</button></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="첫 번째 이름" aria-label="첫 번째 참가자" required /><select name="character" aria-label="첫 번째 캐릭터"></select><div class="mini-character-picker" aria-label="첫 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>곰</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="두 번째 이름" aria-label="두 번째 참가자" required /><select name="character" aria-label="두 번째 캐릭터"></select><div class="mini-character-picker" aria-label="두 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>토끼</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="세 번째 이름 (선택)" aria-label="세 번째 참가자" /><select name="character" aria-label="세 번째 캐릭터"></select><div class="mini-character-picker" aria-label="세 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>고양이</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="네 번째 이름 (선택)" aria-label="네 번째 참가자" /><select name="character" aria-label="네 번째 캐릭터"></select><div class="mini-character-picker" aria-label="네 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>오리</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
         </div>
         <div class="settings">
           <label><input id="sound-toggle" type="checkbox" checked /> 소리</label>
@@ -161,14 +154,6 @@
         </div>
         <button id="setup-submit" class="primary" type="submit" disabled>게임 준비 중</button>
       </form>
-    </section>
-    <section id="character-picker" role="dialog" aria-modal="true" aria-labelledby="character-title" hidden>
-      <div class="character-dialog">
-        <header><h2 id="character-title">함께 달릴 친구</h2><button id="character-close" type="button">닫기</button></header>
-        <p>좌우로 넘겨 한 친구를 고른 뒤 확정해주세요.</p>
-        <div id="character-stage"><button id="character-prev" class="carousel-arrow" type="button" aria-label="이전 캐릭터">‹</button><div id="character-track"></div><button id="character-next" class="carousel-arrow" type="button" aria-label="다음 캐릭터">›</button></div>
-        <div class="character-confirm"><strong id="selected-character-name"></strong><button id="character-confirm" type="button">이 친구로 결정</button></div>
-      </div>
     </section>
     <section id="result" class="overlay" aria-labelledby="result-title" hidden>
       <div class="card">
