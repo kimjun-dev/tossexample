@@ -15,7 +15,7 @@ const PAD_POINTS = [
   new THREE.Vector3(-18, -35, -10),
   new THREE.Vector3(18, -35, -10)
 ];
-const START_PADS = [[0, 3], [1, 2], [0, 1], [2, 3]];
+const START_PADS = [[0, 1, 2, 3], [1, 0, 3, 2], [0, 1, 2, 3], [1, 0, 3, 2]];
 
 const game = document.querySelector('#game');
 const guide = document.querySelector('#guide');
@@ -31,7 +31,9 @@ const resultTitle = document.querySelector('#result-title');
 const resultCopy = document.querySelector('#result-copy');
 const resultList = document.querySelector('#result-list');
 let world;
+let eventQueue;
 let racers = [];
+const colliderRacers = new Map();
 let running = false;
 let finished = false;
 let cameraY = 0;
@@ -234,43 +236,43 @@ function detachPad(racer, anchor) {
 
 function nextPad(racer) {
   const occupied = new Set(racer.anchors.map((anchor) => anchor.padIndex));
-  const current = racer.anchors[0]?.padIndex ?? 0;
-  const oppositeGroup = current < 2 ? [2, 3] : [0, 1];
-  const candidates = [...oppositeGroup, 0, 1, 2, 3].filter((index, position, all) =>
-    !occupied.has(index) && all.indexOf(index) === position
-  );
-  return candidates.sort((a, b) => {
-    const pointA = padWorld(racer, a);
-    const pointB = padWorld(racer, b);
-    return pointA.y - pointB.y || Math.abs(pointA.z - WALL_Z) - Math.abs(pointB.z - WALL_Z);
-  })[0];
+  const anchor = racer.anchors[0].anchorBody.translation();
+  const anchorIsHand = racer.anchors[0].padIndex < 2;
+  return [0, 1, 2, 3]
+    .filter((index) => !occupied.has(index)
+      && (index < 2) !== anchorIsHand
+      && padWorld(racer, index).y < anchor.y - 28)
+    .sort((a, b) => {
+      const pointA = padWorld(racer, a);
+      const pointB = padWorld(racer, b);
+      return Math.abs(pointA.z - WALL_Z) - Math.abs(pointB.z - WALL_Z)
+        || pointA.y - pointB.y
+        || Math.abs(pointA.x - anchor.x) - Math.abs(pointB.x - anchor.x);
+    })[0];
 }
 
 function beginFlip(racer) {
   const rotation = racer.body.rotation();
-  const pivot = PAD_POINTS[racer.anchors[0].padIndex].clone()
-    .applyQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w));
-  const outwardDirection = pivot.y >= 0 ? -1 : 1;
+  const position = racer.body.translation();
+  const anchor = racer.anchors[0].anchorBody.translation();
+  racer.flipAxisX = Math.sign(position.z - anchor.z) || 1;
   racer.flipStart = { ...rotation };
   racer.gripElapsed = 0;
   racer.isFlipping = true;
-  racer.body.setAngvel({
-    x: outwardDirection * (15 + Math.random() * 2),
-    y: (Math.random() - 0.5) * 0.7,
-    z: racer.flipDirection * (0.35 + Math.random() * 0.45)
-  }, true);
+  racer.body.setAngvel({ x: racer.flipAxisX * 2.5, y: 0, z: racer.flipDirection * 0.15 }, true);
   racer.flipDirection *= -1;
+  racer.body.wakeUp();
 }
 
 function releaseExtraPad(racer) {
   detachPad(racer, racer.anchors[0]);
-  beginFlip(racer);
+  if (racer.anchors.length === 1) beginFlip(racer);
 }
 
 function landOnNextPad(racer) {
   attachPad(racer, nextPad(racer));
   racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  racer.stickDuration = 0.2 + Math.random() * 0.08;
+  racer.stickDuration = 0.5 + Math.random() * 0.35;
   racer.gripElapsed = -racer.stickDuration;
   racer.isFlipping = false;
 }
@@ -285,41 +287,27 @@ function rotationSinceFlip(racer) {
 function createBodyColliders(index, body) {
   const add = (hx, hy, hz, radius, x, y, angle = 0) => {
     const rotation = { x: 0, y: 0, z: Math.sin(angle / 2), w: Math.cos(angle / 2) };
-    world.createCollider(
+    const collider = world.createCollider(
       RAPIER.ColliderDesc.roundCuboid(hx, hy, hz, radius)
         .setTranslation(x, y, 0)
         .setRotation(rotation)
         .setDensity(0.0007)
-        .setFriction(0.08)
-        .setRestitution(0),
+        .setFriction(0)
+        .setRestitution(0.18)
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       body
     );
+    colliderRacers.set(collider.handle, index);
   };
 
   // roundCuboid는 borderRadius만큼 모든 축으로 커지므로 hz + radius를
   // 몸 중심과 벽 사이 거리(10)에 맞춰 벽 관통과 떨림을 막는다.
-  add(16, 22, 4, 6, 0, -3);
-  add(18, 16, 3, 7, 0, 25);
-  add(6, 16, 7, 3, -23, 13, 0.78);
-  add(6, 16, 7, 3, 23, 13, -0.78);
-  add(7, 14, 6.5, 3.5, -10, -30, -0.34);
-  add(7, 14, 6.5, 3.5, 10, -30, 0.34);
-
-  if (index === 0) {
-    add(6, 6, 7, 3, -14, 43);
-    add(6, 6, 7, 3, 14, 43);
-  } else if (index === 1) {
-    add(4, 12, 8, 2, -7, 45, -0.08);
-    add(4, 12, 8, 2, 7, 45, 0.08);
-  } else if (index === 2) {
-    add(5, 6, 7.5, 2.5, -12, 39, -0.25);
-    add(5, 6, 7.5, 2.5, 12, 39, 0.25);
-  }
+  add(21, 34, 4, 7, 0, -2);
 }
 
 function createRacer(index) {
   const x = -136.5 + index * 91;
-  const initialGrip = 0.32 + Math.random() * 0.06;
+  const initialGrip = 0.65 + Math.random() * 0.25;
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, screenToWorldY(150), 5)
@@ -340,14 +328,16 @@ function createRacer(index) {
     anchors: [],
     gripElapsed: -initialGrip,
     flipStart: { ...body.rotation() },
+    flipAxisX: 1,
     flipDirection: index % 2 ? -1 : 1,
     isFlipping: false,
+    lowestY: body.translation().y,
     stickDuration: initialGrip,
     placed: false,
     active: true
   };
   START_PADS[index].forEach((pad) => attachPad(racer, pad));
-  body.setAngvel({ x: 0.12 * (index - 1.5), y: 0.08 * (1.5 - index), z: 0.05 * (index % 2 ? 1 : -1) }, true);
+  body.setAngvel({ x: 0, y: 0, z: 0.05 * (index % 2 ? 1 : -1) }, true);
   return racer;
 }
 
@@ -357,6 +347,7 @@ function placeRacer(racer, x, worldY) {
   racer.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
   racer.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
   racer.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  racer.lowestY = worldY;
   START_PADS[racer.index].forEach((pad) => attachPad(racer, pad));
 }
 
@@ -389,6 +380,7 @@ function setParticipants(names) {
     racer.label.hidden = !racer.active;
     if (racer.active) racer.label.textContent = names[index];
     else [...racer.anchors].forEach((anchor) => detachPad(racer, anchor));
+    racer.body.setEnabled(racer.active);
   });
   resetRace();
 }
@@ -436,14 +428,23 @@ function syncVisuals(dt) {
       const firstRelease = racer.anchors.length > 1 && racer.gripElapsed >= 0;
       const readyToFlip = racer.anchors.length === 1 && !racer.isFlipping && racer.gripElapsed >= 0;
       const flipAngle = racer.isFlipping ? rotationSinceFlip(racer) : 0;
-      const landingPad = racer.isFlipping ? nextPad(racer) : 0;
-      const landingPoint = racer.isFlipping ? padWorld(racer, landingPad) : null;
+      if (racer.isFlipping) {
+        const angular = racer.body.angvel();
+        const rollingSpeed = 2.5 + 6 * (1 - Math.exp(-racer.gripElapsed * 2));
+        if (angular.x * racer.flipAxisX < rollingSpeed) {
+          racer.body.setAngvel({ x: racer.flipAxisX * rollingSpeed, y: angular.y, z: angular.z }, true);
+        }
+      }
+      const landingPad = racer.isFlipping ? nextPad(racer) : undefined;
+      const landingPoint = landingPad === undefined ? null : padWorld(racer, landingPad);
       const lowerPadTouched = racer.isFlipping
-        && landingPoint.y < racer.anchors[0].anchorBody.translation().y - 4
-        && Math.abs(landingPoint.z - WALL_Z) < 28;
+        && landingPoint
+        && landingPoint.y < racer.anchors[0].anchorBody.translation().y - 28
+        && Math.abs(landingPoint.z - WALL_Z) < 12;
       const completedFlip = racer.isFlipping
-        && racer.gripElapsed > 0.22
-        && ((flipAngle > 2.45 && lowerPadTouched) || racer.gripElapsed > 1.45);
+        && racer.gripElapsed > 0.12
+        && lowerPadTouched
+        && flipAngle > 1.2;
       if (firstRelease) releaseExtraPad(racer);
       else if (readyToFlip) beginFlip(racer);
       else if (completedFlip) landOnNextPad(racer);
@@ -532,8 +533,16 @@ async function boot() {
   await RAPIER.init();
   world = new RAPIER.World({ x: 0, y: -520, z: 0 });
   world.timestep = 1 / 60;
+  eventQueue = new RAPIER.EventQueue(true);
   const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, screenToWorldY(800), WALL_Z - 2));
-  world.createCollider(RAPIER.ColliderDesc.cuboid(WIDTH / 2, 850, 2).setFriction(0.08).setRestitution(0), wallBody);
+  for (const side of [-1, 1]) {
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(4, 850, 40)
+        .setTranslation(side * (WIDTH / 2 + 4), 0, 10)
+        .setFriction(0),
+      wallBody
+    );
+  }
   makeWall();
   racers = KEYS.map((_, index) => createRacer(index));
   resize();
@@ -548,7 +557,32 @@ async function boot() {
     if (running) {
       accumulator += dt;
       while (accumulator >= 1 / 60) {
-        world.step();
+        world.step(eventQueue);
+        racers.forEach((racer) => {
+          if (!racer.active) return;
+          const position = racer.body.translation();
+          if (position.y <= racer.lowestY) {
+            racer.lowestY = position.y;
+            return;
+          }
+          racer.body.setTranslation({ x: position.x, y: racer.lowestY, z: position.z }, true);
+          const velocity = racer.body.linvel();
+          if (velocity.y > 0) racer.body.setLinvel({ x: velocity.x, y: 0, z: velocity.z }, true);
+        });
+        const impacted = new Set();
+        eventQueue.drainCollisionEvents((handleA, handleB, started) => {
+          const racerA = colliderRacers.get(handleA);
+          const racerB = colliderRacers.get(handleB);
+          if (started && racerA !== undefined && racerB !== undefined && racerA !== racerB) {
+            impacted.add(racerA);
+            impacted.add(racerB);
+          }
+        });
+        impacted.forEach((index) => {
+          const racer = racers[index];
+          if (!racer) return;
+          if (racer.anchors.length > 1) racer.gripElapsed += 0.14;
+        });
         accumulator -= 1 / 60;
       }
     }
