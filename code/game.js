@@ -14,6 +14,7 @@ const GRIP_Z = WALL_Z + 10;
 const RACER_GAP_X = 78;
 const EDGE_SOFT_LIMIT = 145;
 const EDGE_INWARD_FORCE = 18;
+const MOLE_UP_TIME = 3;
 const PLACEMENT_PARTS = [
   { x: 0, y: 25, rx: 22, ry: 20 },
   { x: 0, y: -3, rx: 19, ry: 25 },
@@ -61,6 +62,8 @@ const result = document.querySelector('#result');
 const resultTitle = document.querySelector('#result-title');
 const resultCopy = document.querySelector('#result-copy');
 const resultList = document.querySelector('#result-list');
+const resultCharacterImage = document.querySelector('#result-character-image');
+const resultSpeech = document.querySelector('#result-speech');
 const commentPrev = document.querySelector('#comment-prev');
 const commentNext = document.querySelector('#comment-next');
 let world;
@@ -68,18 +71,22 @@ let eventQueue;
 let racers = [];
 let mountains = [];
 const colliderRacers = new Map();
+let mole;
 let running = false;
 let finished = false;
 let cameraY = 0;
 let raceElapsed = 0;
 let raceStartedAt = 0;
-let mode = 'friends';
 let soundEnabled = true;
 let hapticEnabled = true;
 let audioContext;
 let resultComments = [];
 let commentIndex = 0;
 let characterPreviews = {};
+let motionListening = false;
+let lastMotionMagnitude;
+let shakeBoostUntil = 0;
+let lastShakeAt = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8de8ee);
@@ -97,6 +104,37 @@ scene.add(keyLight);
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const motionScale = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
+
+function motionMagnitude(acceleration) {
+  return acceleration ? Math.hypot(acceleration.x || 0, acceleration.y || 0, acceleration.z || 0) : 0;
+}
+
+console.assert(motionMagnitude({ x: 3, y: 4, z: 0 }) === 5, 'motion magnitude failed');
+
+function handleDeviceMotion(event) {
+  if (!running) return;
+  const acceleration = event.acceleration;
+  const magnitude = motionMagnitude(acceleration || event.accelerationIncludingGravity);
+  const intensity = acceleration ? magnitude : Math.abs(magnitude - (lastMotionMagnitude ?? magnitude));
+  lastMotionMagnitude = magnitude;
+  const now = performance.now();
+  if (intensity < 9 || now - lastShakeAt < 250) return;
+  lastShakeAt = now;
+  shakeBoostUntil = now + 1200;
+  buzz(25);
+}
+
+async function enableMotionSensor() {
+  if (motionListening || typeof DeviceMotionEvent === 'undefined') return;
+  try {
+    if (typeof DeviceMotionEvent.requestPermission === 'function'
+      && await DeviceMotionEvent.requestPermission() !== 'granted') return;
+    addEventListener('devicemotion', handleDeviceMotion);
+    motionListening = true;
+  } catch (error) {
+    console.warn('기기 흔들기 감지를 사용할 수 없어요.', error);
+  }
+}
 
 function showOverlay(overlay) {
   overlay.hidden = false;
@@ -158,131 +196,996 @@ function makeWall() {
   const canvas = document.createElement('canvas');
   canvas.width = WIDTH;
   canvas.height = COURSE_HEIGHT;
+
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#8de8ee';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const drawCloud = (x, y, scale = 1) => {
-    ctx.fillStyle = '#f8ffff';
-    ctx.beginPath();
-    ctx.arc(x, y, 18 * scale, Math.PI, 0);
-    ctx.arc(x + 22 * scale, y - 9 * scale, 25 * scale, Math.PI, 0);
-    ctx.arc(x + 50 * scale, y, 18 * scale, Math.PI, 0);
-    ctx.lineTo(x + 50 * scale, y + 10 * scale);
-    ctx.lineTo(x, y + 10 * scale);
-    ctx.closePath();
-    ctx.fill();
-  };
-  const drawMountain = (x, baseY, width, height, color) => {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(x - width, baseY);
-    ctx.lineTo(x, baseY - height);
-    ctx.lineTo(x + width, baseY);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#f8ffff';
-    ctx.beginPath();
-    ctx.moveTo(x - width * 0.22, baseY - height * 0.78);
-    ctx.lineTo(x, baseY - height);
-    ctx.lineTo(x + width * 0.24, baseY - height * 0.76);
-    ctx.lineTo(x + width * 0.1, baseY - height * 0.65);
-    ctx.lineTo(x - width * 0.04, baseY - height * 0.71);
-    ctx.lineTo(x - width * 0.15, baseY - height * 0.64);
-    ctx.closePath();
-    ctx.fill();
-  };
-  const drawTree = (x, y, scale = 1) => {
-    ctx.fillStyle = '#755033';
-    ctx.fillRect(x - 3 * scale, y - 3 * scale, 6 * scale, 25 * scale);
-    ctx.fillStyle = '#28784a';
-    ctx.beginPath();
-    ctx.arc(x - 11 * scale, y - 12 * scale, 14 * scale, 0, Math.PI * 2);
-    ctx.arc(x + 10 * scale, y - 15 * scale, 16 * scale, 0, Math.PI * 2);
-    ctx.arc(x, y - 31 * scale, 18 * scale, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  drawCloud(24, 78, 0.8);
-  drawCloud(250, 150, 0.7);
-  drawCloud(86, 610, 0.65);
-  drawMountain(70, 340, 110, 150, '#48c4dc');
-  drawMountain(268, 360, 145, 185, '#50bdd6');
-  drawMountain(120, 815, 150, 160, '#58c6d8');
-  drawMountain(320, 1180, 130, 170, '#48bad2');
-
-  ctx.fillStyle = '#8fbd54';
-  ctx.beginPath();
-  ctx.moveTo(0, 300);
-  ctx.quadraticCurveTo(90, 250, 190, 320);
-  ctx.quadraticCurveTo(300, 250, 390, 310);
-  ctx.lineTo(390, COURSE_HEIGHT);
-  ctx.lineTo(0, COURSE_HEIGHT);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#b9d54a';
-  ctx.beginPath();
-  ctx.moveTo(0, 520);
-  ctx.quadraticCurveTo(120, 430, 240, 540);
-  ctx.quadraticCurveTo(320, 470, 390, 520);
-  ctx.lineTo(390, COURSE_HEIGHT);
-  ctx.lineTo(0, COURSE_HEIGHT);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.save();
-  ctx.strokeStyle = '#f3d938';
-  ctx.lineWidth = 34;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(92, 300);
-  ctx.bezierCurveTo(18, 560, 205, 760, 92, 1030);
-  ctx.bezierCurveTo(14, 1240, 190, 1440, 118, 1730);
-  ctx.bezierCurveTo(36, 1980, 196, 2310, 88, COURSE_HEIGHT + 20);
-  ctx.stroke();
-  ctx.strokeStyle = '#fff18a';
-  ctx.lineWidth = 9;
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = '#35a8da';
-  ctx.lineWidth = 50;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(330, 270);
-  ctx.bezierCurveTo(245, 560, 355, 810, 260, 1090);
-  ctx.bezierCurveTo(200, 1310, 305, 1480, 220, 1740);
-  ctx.bezierCurveTo(160, 2010, 315, 2320, 245, COURSE_HEIGHT + 20);
-  ctx.stroke();
-  ctx.strokeStyle = '#87def0';
-  ctx.lineWidth = 16;
-  ctx.stroke();
-  ctx.restore();
-
-  for (let y = 390; y < canvas.height; y += 175) {
-    for (const x of [24, 74, 344, 380]) drawTree(x, y + (x % 3) * 8, 0.72 + (x % 2) * 0.18);
+  if (!ctx) {
+    throw new Error('Failed to create map canvas context');
   }
 
-  ctx.strokeStyle = '#df7040';
-  ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(20, START_LINE_Y); ctx.lineTo(370, START_LINE_Y); ctx.stroke();
-  for (let x = 20; x < 370; x += 20) {
-    ctx.fillStyle = x % 40 ? '#245444' : '#f6e8be';
-    ctx.fillRect(x, FLOOR_Y - 4, 20, 8);
-  }
-  ctx.fillStyle = '#23533d';
-  ctx.font = '800 17px Outfit, system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText('끝까지 간 친구의 승리', WIDTH / 2, FLOOR_Y - 18);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const wall = new THREE.Mesh(
-    new THREE.PlaneGeometry(WIDTH, canvas.height),
-    new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false })
+  // ------------------------------------------------------------
+  // Palette
+  // ------------------------------------------------------------
+  const colors = {
+    skyTop: '#8edfeb',
+    skyBottom: '#d8f3e6',
+
+    mountainFar: '#91ced2',
+    mountainMid: '#69b7b2',
+    mountainNear: '#4b9e82',
+    snow: '#f5fbf6',
+
+    grassFar: '#91c96d',
+    grass: '#75b85e',
+    grassLight: '#a9d975',
+    grassDark: '#4e9560',
+
+    roadEdge: '#d9b965',
+    road: '#f5db78',
+    roadHighlight: '#fff1ad',
+
+    riverEdge: '#388fb5',
+    river: '#53b9d8',
+    riverHighlight: '#a7e8ef',
+
+    treeTrunk: '#79563c',
+    treeDark: '#327552',
+    tree: '#419262',
+    treeLight: '#6ab673',
+
+    rock: '#839a90',
+    rockLight: '#b3c6b8',
+
+    flowerPink: '#ef9caf',
+    flowerYellow: '#f2ca62',
+    flowerWhite: '#fff8e8',
+
+    text: '#315444'
+  };
+
+  // ------------------------------------------------------------
+  // Deterministic pseudo random
+  // 화면을 다시 열어도 배치가 계속 바뀌지 않도록 seed 사용
+  // ------------------------------------------------------------
+  let seed = 73129;
+
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  const range = (min, max) => min + (max - min) * random();
+
+  // ------------------------------------------------------------
+  // Sky
+  // ------------------------------------------------------------
+  const skyGradient = ctx.createLinearGradient(
+    0,
+    0,
+    0,
+    COURSE_HEIGHT
   );
-  wall.position.set(0, screenToWorldY(canvas.height / 2), WALL_Z - 2.1);
+
+  skyGradient.addColorStop(0, colors.skyTop);
+  skyGradient.addColorStop(0.32, colors.skyBottom);
+  skyGradient.addColorStop(1, colors.grassLight);
+
+  ctx.fillStyle = skyGradient;
+  ctx.fillRect(0, 0, WIDTH, COURSE_HEIGHT);
+
+  // ------------------------------------------------------------
+  // Drawing helpers
+  // ------------------------------------------------------------
+  const drawCloud = (
+    x,
+    y,
+    scale = 1,
+    alpha = 0.85
+  ) => {
+    ctx.save();
+
+    ctx.globalAlpha = alpha;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+    ctx.beginPath();
+    ctx.ellipse(
+      x + 28 * scale,
+      y + 10 * scale,
+      43 * scale,
+      13 * scale,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+
+    ctx.fillStyle = '#f9ffff';
+    ctx.beginPath();
+
+    ctx.arc(
+      x,
+      y,
+      15 * scale,
+      Math.PI,
+      0
+    );
+
+    ctx.arc(
+      x + 19 * scale,
+      y - 9 * scale,
+      22 * scale,
+      Math.PI,
+      0
+    );
+
+    ctx.arc(
+      x + 43 * scale,
+      y,
+      16 * scale,
+      Math.PI,
+      0
+    );
+
+    ctx.lineTo(
+      x + 43 * scale,
+      y + 10 * scale
+    );
+
+    ctx.lineTo(
+      x,
+      y + 10 * scale
+    );
+
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  };
+
+  const drawMountain = ({
+    x,
+    baseY,
+    width,
+    height,
+    color,
+    alpha = 1,
+    snow = false
+  }) => {
+    ctx.save();
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x - width,
+      baseY
+    );
+
+    ctx.quadraticCurveTo(
+      x - width * 0.45,
+      baseY - height * 0.45,
+      x,
+      baseY - height
+    );
+
+    ctx.quadraticCurveTo(
+      x + width * 0.45,
+      baseY - height * 0.38,
+      x + width,
+      baseY
+    );
+
+    ctx.closePath();
+    ctx.fill();
+
+    if (snow) {
+      ctx.fillStyle = colors.snow;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        x - width * 0.2,
+        baseY - height * 0.72
+      );
+
+      ctx.lineTo(
+        x,
+        baseY - height
+      );
+
+      ctx.lineTo(
+        x + width * 0.21,
+        baseY - height * 0.71
+      );
+
+      ctx.lineTo(
+        x + width * 0.1,
+        baseY - height * 0.63
+      );
+
+      ctx.lineTo(
+        x,
+        baseY - height * 0.68
+      );
+
+      ctx.lineTo(
+        x - width * 0.09,
+        baseY - height * 0.61
+      );
+
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
+  };
+
+  const drawHill = (
+    y,
+    color,
+    amplitude,
+    phase
+  ) => {
+    ctx.fillStyle = color;
+
+    ctx.beginPath();
+    ctx.moveTo(0, COURSE_HEIGHT);
+
+    ctx.lineTo(0, y);
+
+    for (let x = 0; x <= WIDTH; x += 15) {
+      const curveY =
+        y
+        + Math.sin(
+          x / 55 + phase
+        ) * amplitude
+        + Math.sin(
+          x / 93 + phase * 1.7
+        ) * amplitude * 0.45;
+
+      ctx.lineTo(
+        x,
+        curveY
+      );
+    }
+
+    ctx.lineTo(
+      WIDTH,
+      COURSE_HEIGHT
+    );
+
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  const drawTree = (
+    x,
+    y,
+    scale = 1,
+    variation = 0
+  ) => {
+    ctx.save();
+
+    ctx.translate(
+      x,
+      y
+    );
+
+    ctx.rotate(variation * 0.025);
+
+    ctx.fillStyle = colors.treeTrunk;
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+      -3.3 * scale,
+      -1 * scale,
+      6.6 * scale,
+      28 * scale,
+      3 * scale
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = colors.treeDark;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      -9 * scale,
+      -15 * scale,
+      15 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.arc(
+      9 * scale,
+      -18 * scale,
+      16 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.arc(
+      0,
+      -34 * scale,
+      19 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = colors.tree;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      -7 * scale,
+      -18 * scale,
+      11 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.arc(
+      8 * scale,
+      -22 * scale,
+      12 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.arc(
+      1 * scale,
+      -36 * scale,
+      13 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = colors.treeLight;
+    ctx.globalAlpha = 0.55;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      -2 * scale,
+      -39 * scale,
+      6 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  };
+
+  const drawRock = (
+    x,
+    y,
+    scale = 1
+  ) => {
+    ctx.save();
+
+    ctx.translate(
+      x,
+      y
+    );
+
+    ctx.fillStyle = colors.rock;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      -10 * scale,
+      4 * scale
+    );
+
+    ctx.quadraticCurveTo(
+      -9 * scale,
+      -7 * scale,
+      -2 * scale,
+      -10 * scale
+    );
+
+    ctx.quadraticCurveTo(
+      9 * scale,
+      -11 * scale,
+      11 * scale,
+      3 * scale
+    );
+
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = colors.rockLight;
+    ctx.globalAlpha = 0.7;
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      -2 * scale,
+      -5 * scale,
+      4 * scale,
+      2.4 * scale,
+      -0.3,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  };
+
+  const drawFlower = (
+    x,
+    y,
+    scale,
+    color
+  ) => {
+    ctx.save();
+
+    ctx.translate(
+      x,
+      y
+    );
+
+    ctx.fillStyle = color;
+
+    for (let i = 0; i < 5; i += 1) {
+      const angle =
+        (Math.PI * 2 * i) / 5;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        Math.cos(angle) * 3 * scale,
+        Math.sin(angle) * 3 * scale,
+        2.3 * scale,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#f2c95f';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      1.6 * scale,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  };
+
+  // ------------------------------------------------------------
+  // Clouds
+  // ------------------------------------------------------------
+  [
+    [18, 70, 0.75, 0.8],
+    [250, 145, 0.7, 0.78],
+    [92, 515, 0.55, 0.62],
+    [285, 740, 0.6, 0.55],
+    [30, 1060, 0.5, 0.45]
+  ].forEach(
+    ([x, y, scale, alpha]) => {
+      drawCloud(
+        x,
+        y,
+        scale,
+        alpha
+      );
+    }
+  );
+
+  // ------------------------------------------------------------
+  // Mountains
+  // ------------------------------------------------------------
+  drawMountain({
+    x: 55,
+    baseY: 355,
+    width: 125,
+    height: 150,
+    color: colors.mountainFar,
+    alpha: 0.8,
+    snow: true
+  });
+
+  drawMountain({
+    x: 265,
+    baseY: 365,
+    width: 155,
+    height: 190,
+    color: colors.mountainMid,
+    alpha: 0.88,
+    snow: true
+  });
+
+  drawMountain({
+    x: 110,
+    baseY: 850,
+    width: 150,
+    height: 165,
+    color: colors.mountainFar,
+    alpha: 0.72
+  });
+
+  drawMountain({
+    x: 320,
+    baseY: 1160,
+    width: 135,
+    height: 170,
+    color: colors.mountainMid,
+    alpha: 0.72
+  });
+
+  drawMountain({
+    x: 70,
+    baseY: 1530,
+    width: 120,
+    height: 145,
+    color: colors.mountainNear,
+    alpha: 0.5
+  });
+
+  // ------------------------------------------------------------
+  // Layered hills
+  // ------------------------------------------------------------
+  drawHill(
+    310,
+    colors.grassFar,
+    22,
+    0.5
+  );
+
+  drawHill(
+    455,
+    colors.grass,
+    28,
+    1.4
+  );
+
+  drawHill(
+    650,
+    colors.grassLight,
+    24,
+    2.2
+  );
+
+  // ------------------------------------------------------------
+  // Tiny grass texture
+  // ------------------------------------------------------------
+  ctx.save();
+
+  ctx.globalAlpha = 0.14;
+  ctx.strokeStyle = colors.grassDark;
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < 260; i += 1) {
+    const x = range(0, WIDTH);
+    const y = range(
+      400,
+      COURSE_HEIGHT
+    );
+
+    const length = range(
+      3,
+      8
+    );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      y
+    );
+
+    ctx.lineTo(
+      x + range(-2, 2),
+      y - length
+    );
+
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // ------------------------------------------------------------
+  // Road
+  // ------------------------------------------------------------
+  const roadPath = () => {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      92,
+      300
+    );
+
+    ctx.bezierCurveTo(
+      18,
+      560,
+      205,
+      760,
+      92,
+      1030
+    );
+
+    ctx.bezierCurveTo(
+      14,
+      1240,
+      190,
+      1440,
+      118,
+      1730
+    );
+
+    ctx.bezierCurveTo(
+      36,
+      1980,
+      196,
+      2310,
+      88,
+      COURSE_HEIGHT + 20
+    );
+  };
+
+  ctx.save();
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.strokeStyle = colors.roadEdge;
+  ctx.lineWidth = 46;
+
+  roadPath();
+  ctx.stroke();
+
+  ctx.strokeStyle = colors.road;
+  ctx.lineWidth = 36;
+
+  roadPath();
+  ctx.stroke();
+
+  ctx.strokeStyle = colors.roadHighlight;
+  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = 6;
+
+  roadPath();
+  ctx.stroke();
+
+  ctx.restore();
+
+  // ------------------------------------------------------------
+  // River
+  // ------------------------------------------------------------
+  const riverPath = () => {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      330,
+      270
+    );
+
+    ctx.bezierCurveTo(
+      245,
+      560,
+      355,
+      810,
+      260,
+      1090
+    );
+
+    ctx.bezierCurveTo(
+      200,
+      1310,
+      305,
+      1480,
+      220,
+      1740
+    );
+
+    ctx.bezierCurveTo(
+      160,
+      2010,
+      315,
+      2320,
+      245,
+      COURSE_HEIGHT + 20
+    );
+  };
+
+  ctx.save();
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.strokeStyle = colors.riverEdge;
+  ctx.lineWidth = 62;
+
+  riverPath();
+  ctx.stroke();
+
+  ctx.strokeStyle = colors.river;
+  ctx.lineWidth = 52;
+
+  riverPath();
+  ctx.stroke();
+
+  ctx.strokeStyle = colors.riverHighlight;
+  ctx.globalAlpha = 0.72;
+  ctx.lineWidth = 8;
+
+  riverPath();
+  ctx.stroke();
+
+  ctx.restore();
+
+  // ------------------------------------------------------------
+  // Trees
+  // ------------------------------------------------------------
+  const treeRows = [
+    430,
+    610,
+    815,
+    1020,
+    1260,
+    1460,
+    1680,
+    1890,
+    2100,
+    2300,
+    2530,
+    2710
+  ];
+
+  treeRows.forEach(
+    (baseY, rowIndex) => {
+      const positions =
+        rowIndex % 2 === 0
+          ? [22, 65, 337, 378]
+          : [12, 52, 350];
+
+      positions.forEach(
+        (baseX, index) => {
+          const x =
+            baseX
+            + range(-11, 11);
+
+          const y =
+            baseY
+            + range(-30, 30);
+
+          const scale =
+            range(0.58, 0.9);
+
+          drawTree(
+            x,
+            y,
+            scale,
+            index - 1.5
+          );
+        }
+      );
+    }
+  );
+
+  // ------------------------------------------------------------
+  // Rocks
+  // ------------------------------------------------------------
+  for (let i = 0; i < 30; i += 1) {
+    const leftSide =
+      random() > 0.5;
+
+    const x =
+      leftSide
+        ? range(8, 72)
+        : range(318, 384);
+
+    const y =
+      range(480, COURSE_HEIGHT - 60);
+
+    drawRock(
+      x,
+      y,
+      range(0.45, 0.9)
+    );
+  }
+
+  // ------------------------------------------------------------
+  // Flowers
+  // ------------------------------------------------------------
+  const flowerColors = [
+    colors.flowerPink,
+    colors.flowerYellow,
+    colors.flowerWhite
+  ];
+
+  for (let i = 0; i < 75; i += 1) {
+    const x =
+      random() > 0.5
+        ? range(8, 78)
+        : range(310, 382);
+
+    const y =
+      range(430, COURSE_HEIGHT - 40);
+
+    drawFlower(
+      x,
+      y,
+      range(0.45, 0.75),
+      flowerColors[
+        Math.floor(
+          random()
+          * flowerColors.length
+        )
+      ]
+    );
+  }
+
+  // ------------------------------------------------------------
+  // Start line
+  // ------------------------------------------------------------
+  ctx.save();
+
+  ctx.strokeStyle = '#e27055';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    18,
+    START_LINE_Y
+  );
+
+  ctx.lineTo(
+    WIDTH - 18,
+    START_LINE_Y
+  );
+
+  ctx.stroke();
+
+  ctx.restore();
+
+  // ------------------------------------------------------------
+  // Finish line
+  // ------------------------------------------------------------
+  const finishX = 20;
+  const finishWidth = 350;
+  const finishCell = 20;
+
+  for (
+    let x = finishX;
+    x < finishX + finishWidth;
+    x += finishCell
+  ) {
+    const index =
+      Math.floor(
+        (x - finishX)
+        / finishCell
+      );
+
+    ctx.fillStyle =
+      index % 2 === 0
+        ? '#31594c'
+        : '#f8ecc5';
+
+    ctx.fillRect(
+      x,
+      FLOOR_Y - 5,
+      finishCell,
+      10
+    );
+  }
+
+  ctx.fillStyle = colors.text;
+
+  ctx.font =
+    '800 17px Outfit, system-ui';
+
+  ctx.textAlign = 'center';
+
+  ctx.fillText(
+    '오늘의 선택을 확인해 보세요',
+    WIDTH / 2,
+    FLOOR_Y - 22
+  );
+
+  // ------------------------------------------------------------
+  // Soft vignette
+  // ------------------------------------------------------------
+  const sideShade =
+    ctx.createLinearGradient(
+      0,
+      0,
+      WIDTH,
+      0
+    );
+
+  sideShade.addColorStop(
+    0,
+    'rgba(32, 92, 72, 0.08)'
+  );
+
+  sideShade.addColorStop(
+    0.12,
+    'rgba(32, 92, 72, 0)'
+  );
+
+  sideShade.addColorStop(
+    0.88,
+    'rgba(32, 92, 72, 0)'
+  );
+
+  sideShade.addColorStop(
+    1,
+    'rgba(32, 92, 72, 0.08)'
+  );
+
+  ctx.fillStyle = sideShade;
+
+  ctx.fillRect(
+    0,
+    0,
+    WIDTH,
+    COURSE_HEIGHT
+  );
+
+  // ------------------------------------------------------------
+  // Three.js texture
+  // ------------------------------------------------------------
+  const texture =
+    new THREE.CanvasTexture(
+      canvas
+    );
+
+  texture.colorSpace =
+    THREE.SRGBColorSpace;
+
+  texture.minFilter =
+    THREE.LinearFilter;
+
+  texture.magFilter =
+    THREE.LinearFilter;
+
+  const wall =
+    new THREE.Mesh(
+      new THREE.PlaneGeometry(
+        WIDTH,
+        canvas.height
+      ),
+      new THREE.MeshBasicMaterial({
+        map: texture,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+
+  wall.position.set(
+    0,
+    screenToWorldY(
+      canvas.height / 2
+    ),
+    WALL_Z - 2.1
+  );
+
   wall.renderOrder = -100;
+
   scene.add(wall);
 }
 
@@ -305,27 +1208,46 @@ function makeMountainVisual(width, height, color) {
   shape.lineTo(0, height);
   shape.lineTo(width, 0);
   shape.closePath();
-  const mountain = new THREE.Mesh(
+  const outline = new THREE.Mesh(
     new THREE.ExtrudeGeometry(shape, { depth: 16, bevelEnabled: true, bevelSize: 2, bevelThickness: 2, bevelSegments: 2 }),
-    new THREE.MeshBasicMaterial({ color })
+    new THREE.MeshBasicMaterial({ color: 0x202020 })
   );
-  mountain.position.z = -8;
-  group.add(mountain);
+  outline.position.z = -8;
+  const mountain = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color }));
+  mountain.scale.set(0.86, 0.82, 1);
+  mountain.position.set(0, 3, 10);
+  group.add(outline, mountain);
+
+  const leftFaceShape = new THREE.Shape();
+  leftFaceShape.moveTo(-width, 0);
+  leftFaceShape.lineTo(0, height);
+  leftFaceShape.lineTo(0, 0);
+  leftFaceShape.closePath();
+  const leftFaceColor = new THREE.Color(color).offsetHSL(0, -0.04, -0.1);
+  const leftFace = new THREE.Mesh(new THREE.ShapeGeometry(leftFaceShape), new THREE.MeshBasicMaterial({ color: leftFaceColor }));
+  leftFace.scale.set(0.86, 0.82, 1);
+  leftFace.position.set(0, 3, 10.5);
+  group.add(leftFace);
 
   const capShape = new THREE.Shape();
-  capShape.moveTo(-width * 0.34, height * 0.66);
+  capShape.moveTo(-width * 0.38, height * 0.62);
   capShape.lineTo(0, height);
-  capShape.lineTo(width * 0.34, height * 0.66);
+  capShape.lineTo(width * 0.38, height * 0.62);
+  capShape.lineTo(width * 0.2, height * 0.68);
+  capShape.lineTo(width * 0.08, height * 0.58);
+  capShape.lineTo(-width * 0.08, height * 0.69);
+  capShape.lineTo(-width * 0.22, height * 0.59);
   capShape.closePath();
-  const cap = new THREE.Mesh(new THREE.ShapeGeometry(capShape), new THREE.MeshBasicMaterial({ color: 0xf0c667 }));
-  cap.position.z = 10.5;
+  const cap = new THREE.Mesh(new THREE.ShapeGeometry(capShape), new THREE.MeshBasicMaterial({ color: 0xfff4c7 }));
+  cap.scale.set(0.86, 0.82, 1);
+  cap.position.set(0, 3, 11);
   group.add(cap);
   return group;
 }
 
 function createMountains() {
   clearMountains();
-  const colors = [0x2f8f52, 0x48a85e, 0x267549, 0x43a55b, 0x327f4c];
+  const colors = [0x846b59, 0x6f7b72, 0x936f56, 0x66766e, 0x7d685e];
   for (let index = 0; index < 5; index += 1) {
     const width = 34 + Math.random() * 9;
     const height = 18 + Math.random() * 7;
@@ -600,6 +1522,73 @@ function createBodyColliders(index, body) {
   add(21, 24, 4, 7, 0, -4);
 }
 
+function createMole() {
+  const group = new THREE.Group();
+  const brown = new THREE.MeshStandardMaterial({ color: 0x765038, roughness: 1 });
+  const dirt = new THREE.Mesh(new THREE.SphereGeometry(22, 16, 8), brown);
+  dirt.scale.set(1.5, 0.22, 0.45);
+  dirt.position.z = -2;
+  const texture = new THREE.TextureLoader().load(new URL('./assets/obstacles/mole-plush.png', import.meta.url).href);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const head = new THREE.Mesh(
+    new THREE.PlaneGeometry(92, 78),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.04 })
+  );
+  head.position.set(0, 18, 2);
+  group.add(dirt, head);
+  scene.add(group);
+
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
+  const collider = world.createCollider(
+    RAPIER.ColliderDesc.ball(40)
+      .setRestitution(1.8)
+      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+    body
+  );
+  collider.setEnabled(false);
+  return { group, dirt, head, body, collider, phase: 'hidden', timer: 1.2, hit: 0 };
+}
+
+function resetMole() {
+  mole.phase = 'hidden';
+  mole.timer = THREE.MathUtils.randFloat(0.5, 1);
+  mole.group.visible = false;
+  mole.collider.setEnabled(false);
+  console.assert(!mole.collider.isEnabled(), 'mole reset failed');
+}
+
+function updateMole(dt) {
+  if (!running) return;
+  mole.timer -= dt;
+  mole.hit = Math.max(0, mole.hit - dt);
+  if (mole.timer <= 0) {
+    if (mole.phase === 'hidden') {
+      const x = THREE.MathUtils.randFloat(-125, 125);
+      const y = cameraY - THREE.MathUtils.randFloat(190, 330);
+      mole.body.setNextKinematicTranslation({ x, y, z: 15 });
+      mole.group.position.set(x, y, 15);
+      mole.group.visible = true;
+      mole.phase = 'warning';
+      mole.timer = 0.5;
+    } else if (mole.phase === 'warning') {
+      mole.phase = 'up';
+      mole.timer = MOLE_UP_TIME;
+      mole.collider.setEnabled(true);
+    } else {
+      mole.phase = 'hidden';
+      mole.timer = THREE.MathUtils.randFloat(0.4, 1);
+      mole.group.visible = false;
+      mole.collider.setEnabled(false);
+    }
+  }
+  if (!mole.group.visible) return;
+  const warning = mole.phase === 'warning';
+  mole.dirt.scale.x = 1.5 + Math.sin(mole.timer * 35) * (warning ? 0.16 : 0.03);
+  const pop = warning ? 0.01 : Math.min(1, (MOLE_UP_TIME - mole.timer) * 7, mole.timer * 7);
+  const squash = mole.hit ? Math.sin(mole.hit / 0.18 * Math.PI) * 0.35 : 0;
+  mole.head.scale.set(1 + squash, Math.max(0.01, pop - squash * 0.45), 1);
+}
+
 function createRacer(index) {
   const x = -136.5 + index * 91;
   const initialGrip = 0.65 + Math.random() * 0.25;
@@ -627,6 +1616,7 @@ function createRacer(index) {
     flipStart: { ...body.rotation() },
     flipAxisX: 1,
     isFlipping: false,
+    knockbackUntil: 0,
     stickDuration: initialGrip,
     lastProgressY: screenToWorldY(150),
     stalledFor: 0,
@@ -635,6 +1625,7 @@ function createRacer(index) {
   };
   START_PADS[index].forEach((pad) => attachPad(racer, pad));
   racer.lastProgressY = anchorProgressY(racer);
+  racer.knockbackUntil = 0;
   body.setAngvel({ x: 0, y: 0, z: 0.05 * (index % 2 ? 1 : -1) }, true);
   return racer;
 }
@@ -664,22 +1655,25 @@ function resetRace() {
   running = false;
   finished = false;
   raceElapsed = 0;
+  shakeBoostUntil = 0;
+  lastMotionMagnitude = undefined;
   cameraY = 0;
   camera.position.y = 0;
   result.hidden = true;
   createMountains();
+  resetMole();
   const active = racers.filter((racer) => racer.active);
   active.forEach((racer, index) => {
     placeRacer(racer, (index - (active.length - 1) / 2) * RACER_GAP_X, screenToWorldY(150));
     racer.placed = false;
     racer.isFlipping = false;
-    racer.stickDuration = 0.32 + Math.random() * 0.06;
-    racer.gripElapsed = -racer.stickDuration;
+    racer.stickDuration = 0;
+    racer.gripElapsed = 0;
     racer.stalledFor = 0;
   });
   status.textContent = '준비';
   raceTimer.textContent = '00:00.00';
-  guide.textContent = mode === 'choice' ? '자동 배치 완료 · 결정 시작' : '직접 배치한 뒤 레이스 시작';
+  guide.textContent = '캐릭터 위치를 정한 뒤 선택 시작';
   guide.disabled = false;
   guide.hidden = false;
 }
@@ -704,13 +1698,6 @@ function setParticipants(names, characterKeys) {
     racer.body.setEnabled(racer.active);
   });
   resetRace();
-  if (mode === 'choice') {
-    racers.filter((racer) => racer.active).forEach((racer, index, active) => {
-      const x = (index - (active.length - 1) / 2) * RACER_GAP_X;
-      const y = screenToWorldY(145 + Math.random() * 85);
-      placeRacer(racer, x, y);
-    });
-  }
 }
 
 function pointerWorld(event) {
@@ -760,7 +1747,7 @@ function nearestOpenPosition(racer, targetX, targetY) {
 
 let draggedRacer = null;
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  if (running || finished || mode === 'choice') return;
+  if (running || finished) return;
   const point = pointerWorld(event);
   draggedRacer = racers.filter((racer) => racer.active).reduce((closest, racer) => {
     const position = racer.body.translation();
@@ -823,14 +1810,19 @@ function syncVisuals(dt) {
       if (racer.stalledFor > 2.5 && raceElapsed > 4) {
         recoverStalledRacer(racer);
       }
-      racer.gripElapsed += dt * (raceElapsed > RACE_RUSH_TIME ? 1.55 : 1);
+      const shakeBoosted = performance.now() < shakeBoostUntil;
+      const speed = shakeBoosted ? 3.2 : raceElapsed > RACE_RUSH_TIME ? 1.55 : 1;
+      racer.gripElapsed += dt * speed;
       const firstRelease = racer.anchors.length > 1 && racer.gripElapsed >= 0;
       const readyToFlip = racer.anchors.length === 1 && !racer.isFlipping && racer.gripElapsed >= 0;
       const flipAngle = racer.isFlipping ? rotationSinceFlip(racer) : 0;
+      const knockedBack = racer.knockbackUntil > raceElapsed;
       if (racer.isFlipping) {
         const angular = racer.body.angvel();
-        const rollingSpeed = 2.5 + 6 * (1 - Math.exp(-racer.gripElapsed * 2));
-        if (angular.x * racer.flipAxisX < rollingSpeed) {
+        const rollingSpeed = (2.5 + 6 * (1 - Math.exp(-racer.gripElapsed * 2))) * (shakeBoosted ? 1.45 : 1);
+        if (knockedBack) {
+          racer.body.setAngvel({ x: -racer.flipAxisX * 10, y: angular.y, z: angular.z }, true);
+        } else if (angular.x * racer.flipAxisX < rollingSpeed) {
           racer.body.setAngvel({ x: racer.flipAxisX * rollingSpeed, y: angular.y, z: angular.z }, true);
         }
       }
@@ -841,6 +1833,7 @@ function syncVisuals(dt) {
         && landingPoint.y < racer.anchors[0].anchorBody.translation().y - 28
         && Math.abs(landingPoint.z - GRIP_Z) < 12;
       const completedFlip = racer.isFlipping
+        && !knockedBack
         && racer.gripElapsed > 0.12
         && lowerPadTouched
         && flipAngle > 1.2;
@@ -869,11 +1862,11 @@ function syncVisuals(dt) {
     const seconds = Math.floor(raceElapsed % 60);
     const hundredths = Math.floor(raceElapsed * 100) % 100;
     raceTimer.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
-    status.textContent = raceElapsed > RACE_RUSH_TIME ? `끝까지 ${progress}%` : `천천히 ${progress}%`;
+    status.textContent = performance.now() < shakeBoostUntil ? `흔들림 감지 · ${progress}%` : `선택 중 ${progress}%`;
     if (raceElapsed >= RACE_LIMIT && !finished) {
-      const leader = racers.filter((racer) => racer.active)
-        .sort((a, b) => a.body.translation().y - b.body.translation().y)[0];
-      finishRace(leader);
+      const choice = racers.filter((racer) => racer.active)
+        .reduce((selected, racer) => racer.body.translation().y < selected.body.translation().y ? racer : selected);
+      finishRace(choice);
     }
   }
 }
@@ -881,26 +1874,21 @@ function syncVisuals(dt) {
 function finishRace(racer) {
   finished = true;
   running = false;
-  const ranking = racers.filter((item) => item.active)
-    .sort((a, b) => a.body.translation().y - b.body.translation().y);
-  status.textContent = `${racer.label.textContent} 우승`;
+  status.textContent = '결정 완료';
   guide.hidden = true;
-  resultTitle.textContent = mode === 'choice'
-    ? `“${decisionQuestion.value.trim()}”의 답`
-    : `${racer.label.textContent} 승!`;
-  const comments = mode === 'choice'
-    ? ['서두르지 않아도 답은 먼저 도착합니다.', '고민 끝. 이번 우화의 결말입니다.', '느린 중력이 대신 골라주었습니다.']
-    : ['빠른 출발보다 끝까지 붙는 힘이 셌습니다.', '토끼도 거북이도 예상하지 못한 결말입니다.', '천천히 내려와도 먼저 닿으면 우승입니다.'];
+  resultTitle.textContent = `“${decisionQuestion.value.trim()}”의 답`;
+  resultCharacterImage.src = characterPreviews[racer.characterKey];
+  resultCharacterImage.alt = `${CHARACTER_NAMES[racer.characterKey]} 캐릭터`;
+  resultSpeech.textContent = `오늘의 선택은\n${racer.label.textContent}이야!`;
+  const comments = ['오늘의 선택을 확인해 보세요.', '고민 끝. 하나를 골랐습니다.', '느린 중력이 대신 골라주었습니다.'];
   resultComments = comments;
   commentIndex = Math.floor(Math.random() * comments.length);
   showComment();
-  const resultItems = mode === 'choice' ? [ranking[0]] : ranking;
-  resultList.replaceChildren(...resultItems.map((item, index) => {
-    const row = document.createElement('li');
-    row.textContent = mode === 'choice' ? `결정: ${item.label.textContent}` : `${index + 1}위  ${item.label.textContent}`;
-    return row;
-  }));
+  const row = document.createElement('li');
+  row.textContent = `결정: ${racer.label.textContent}`;
+  resultList.replaceChildren(row);
   showOverlay(result);
+  gsap.from('.result-character', { y: 16, opacity: 0, scale: 0.94, duration: 0.45 * motionScale, delay: 0.12 * motionScale, ease: 'back.out(1.8)' });
   gsap.from(resultList.children, { y: 18, opacity: 0, stagger: 0.08, duration: 0.4 * motionScale, delay: 0.18 * motionScale });
   tone(CHARACTER_TONES[racer.characterKey], 0.25);
   buzz([60, 40, 100]);
@@ -924,7 +1912,7 @@ async function startRace() {
   signalLights.forEach((light) => light.className = '');
   for (let count = 3; count > 0; count -= 1) {
     startCount.textContent = `${count}`;
-    startCaption.textContent = '출발 준비';
+    startCaption.textContent = '고르는 중';
     signalLights[3 - count].className = 'on';
     gsap.fromTo('.start-board', { scale: 0.78, rotation: -2 }, { scale: 1, rotation: 0, duration: 0.38 * motionScale, ease: 'back.out(2)' });
     gsap.fromTo(startCount, { scale: 1.55, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3 * motionScale, ease: 'power3.out' });
@@ -933,8 +1921,8 @@ async function startRace() {
     await wait(700);
   }
   signalLights.forEach((light) => light.className = 'go');
-  startCount.textContent = '출발!';
-  startCaption.textContent = mode === 'choice' ? '결정은 중력에게' : '먼저 도착하면 우승';
+  startCount.textContent = '선택!';
+  startCaption.textContent = '결정은 중력에게';
   gsap.fromTo(startCount, { scale: 0.65 }, { scale: 1.08, duration: 0.32 * motionScale, ease: 'back.out(2.4)' });
   gsap.fromTo(game, { x: -5 }, { x: 0, duration: 0.08, repeat: 5, yoyo: true, clearProps: 'x' });
   tone(820, 0.3);
@@ -967,12 +1955,13 @@ async function boot() {
     );
   }
   makeWall();
+  mole = createMole();
   racers = KEYS.map((_, index) => createRacer(index));
   characterPreviews = renderCharacterPreviews();
   syncCharacterOptions();
   resize();
   setupSubmit.disabled = false;
-  setupSubmit.textContent = '찰싹 붙이러 가기';
+  setupSubmit.textContent = '중력에게 결정 맡기기';
   gsap.from('#setup-form', { opacity: 0, duration: 0.5 * motionScale, ease: 'power2.out' });
   gsap.from('.hero-title img', { scale: 0.8, opacity: 0.2, duration: 0.8 * motionScale, ease: 'back.out(1.6)' });
   revealText(setupDescription);
@@ -986,6 +1975,7 @@ async function boot() {
     if (running) {
       accumulator += dt;
       while (accumulator >= 1 / 60) {
+        updateMole(world.timestep);
         racers.forEach((racer) => {
           if (!racer.active) return;
           const x = racer.body.translation().x;
@@ -1004,6 +1994,20 @@ async function boot() {
             impacted.add(racerA);
             impacted.add(racerB);
           }
+          const moleHit = handleA === mole.collider.handle ? racerB : handleB === mole.collider.handle ? racerA : undefined;
+          if (started && moleHit !== undefined) {
+            const racer = racers[moleHit];
+            const direction = Math.sign(racer.body.translation().x - mole.body.translation().x) || 1;
+            const mass = racer.body.mass();
+            while (racer.anchors.length > 1) detachPad(racer, racer.anchors[0]);
+            if (!racer.isFlipping) beginFlip(racer);
+            racer.knockbackUntil = raceElapsed + 0.65;
+            racer.body.applyImpulse({ x: direction * mass * 380, y: mass * 440, z: 0 }, true);
+            mole.hit = 0.18;
+            gsap.fromTo(game, { x: -direction * 9, scale: 1.015 }, { x: 0, scale: 1, duration: 0.07, repeat: 3, yoyo: true, clearProps: 'x,scale' });
+            tone(120, 0.16);
+            buzz([70, 30, 110]);
+          }
         });
         impacted.forEach((index) => {
           const racer = racers[index];
@@ -1020,7 +2024,10 @@ async function boot() {
   requestAnimationFrame(frame);
 }
 
-guide.addEventListener('click', startRace);
+guide.addEventListener('click', async () => {
+  await enableMotionSensor();
+  startRace();
+});
 setupForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const participants = nameInputs.map((input, index) => ({ name: input.value.trim(), character: characterSelects[index].value })).filter(({ name }) => name);
@@ -1031,36 +2038,10 @@ setupForm.addEventListener('submit', (event) => {
   }
   soundEnabled = document.querySelector('#sound-toggle').checked;
   hapticEnabled = document.querySelector('#haptic-toggle').checked;
-  const characterKeys = mode === 'choice'
-    ? [...CHARACTER_KEYS].sort(() => Math.random() - 0.5).slice(0, names.length)
-    : participants.map(({ character }) => character);
+  const characterKeys = participants.map(({ character }) => character);
   setParticipants(names, characterKeys);
   hideOverlay(setup);
   tone(420);
-});
-document.querySelectorAll('[data-mode]').forEach((button) => {
-  button.addEventListener('click', () => {
-    mode = button.dataset.mode;
-    game.dataset.mode = mode;
-    document.querySelectorAll('[data-mode]').forEach((item) => {
-      item.setAttribute('aria-pressed', String(item === button));
-    });
-    const choiceMode = mode === 'choice';
-    characterSelects.forEach((select) => { select.disabled = choiceMode; });
-    setupDescription.textContent = choiceMode
-      ? '고민되는 선택지를 적어주세요. 느린 중력이 결말을 정합니다.'
-      : '이름을 적고 벽에 붙여주세요. 이번 이야기의 결말은 중력이 정합니다.';
-    revealText(setupDescription);
-    nameInputs.forEach((input, index) => {
-      input.placeholder = `${index + 1}번째 ${choiceMode ? '선택지' : '이름'}${index > 1 ? ' (선택)' : ''}`;
-      input.setAttribute('aria-label', `${index + 1}번째 ${choiceMode ? '선택지' : '참가자'}`);
-    });
-    decisionQuestion.required = choiceMode;
-    setupSubmit.textContent = choiceMode ? '중력에게 결정 맡기기' : '찰싹 붙이러 가기';
-    document.querySelector('#edit-players').textContent = choiceMode ? '선택지 변경' : '이름 변경';
-    document.querySelector('#replay').textContent = choiceMode ? '다시 결정' : '한 판 더';
-    syncCharacterOptions();
-  });
 });
 function syncCharacterOptions() {
   const active = characterSelects.map((_, index) => index < 2 || Boolean(nameInputs[index].value.trim()));
@@ -1073,7 +2054,7 @@ function syncCharacterOptions() {
   characterSelects.forEach((select, index) => {
     const used = new Set(characterSelects.filter((_, otherIndex) => otherIndex !== index && active[otherIndex]).map((item) => item.value));
     [...select.options].forEach((option) => { option.disabled = used.has(option.value); });
-    const disabled = mode === 'choice' || !active[index];
+    const disabled = !active[index];
     characterPickers[index].setAttribute('aria-disabled', String(disabled));
     characterPickers[index].querySelectorAll('button').forEach((button) => { button.disabled = disabled; });
     characterPreviewLabels[index].textContent = active[index] ? CHARACTER_NAMES[select.value] : '이름 입력 후 선택';

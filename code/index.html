@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>찰싹 레이스</title>
+  <title>찰싹 결정</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
     :root { color-scheme: light; --ink: #183b32; --forest: #245444; --moss: #89a778; --cream: #fbf5df; --paper: #f3e9c9; --carrot: #df7040; --sun: #f0c667; }
@@ -41,10 +41,7 @@
     .turtle-mark { position: absolute; top: 58px; right: -18px; width: 80px; height: 58px; opacity: .18; transform: rotate(-12deg); }
     .turtle-mark::before { position: absolute; inset: 9px 18px 5px 4px; border: 4px double var(--forest); border-radius: 50%; content: ""; }
     .turtle-mark::after { position: absolute; top: 19px; right: 5px; width: 18px; height: 16px; border-radius: 50%; background: var(--forest); box-shadow: -49px -15px 0 -4px var(--forest), -49px 22px 0 -4px var(--forest), -16px -16px 0 -4px var(--forest), -16px 23px 0 -4px var(--forest); content: ""; }
-    .mode-picker { display: flex; gap: 6px; margin-bottom: 12px; }
-    .mode-picker button, .secondary { min-width: 0; padding: 11px; border: 1px solid #5f503b; border-radius: 3px 10px 3px 10px; color: var(--ink); background: #fff8e7; box-shadow: 2px 3px 0 #d8c59a; font-weight: 800; transition: flex .45s cubic-bezier(.2,.8,.2,1), transform .25s ease, background .25s ease; }
-    .mode-picker button { flex: 1; }
-    .mode-picker button[aria-pressed="true"] { flex: 1.45; color: var(--cream); background: var(--forest); }
+    .secondary { min-width: 0; padding: 11px; border: 1px solid #5f503b; border-radius: 3px 10px 3px 10px; color: var(--ink); background: #fff8e7; box-shadow: 2px 3px 0 #d8c59a; font-weight: 800; transition: transform .25s ease, background .25s ease; }
     #name-fields { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: dense; gap: 1px; overflow: hidden; border: 1px solid #5f503b; border-radius: 3px 12px 3px 12px; background: #5f503b; box-shadow: 3px 4px 0 #d8c59a; }
     .participant { min-width: 0; display: grid; background: #fffbd5; }
     #name-fields input, #name-fields select { min-width: 0; width: 100%; border: 0; border-radius: 0; color: var(--ink); background: #fffbd5; outline: none; }
@@ -57,11 +54,9 @@
     .mini-character-picker[aria-disabled="true"] { opacity: .35; }
     #name-fields select option:disabled { color: #aaa; }
     #name-fields input:focus { position: relative; z-index: 1; box-shadow: inset 0 0 0 2px var(--carrot); }
-    #game[data-mode="choice"] .mini-character-picker { display: none; }
     #decision-question { display: none; width: 100%; margin-bottom: 9px; padding: 13px 14px; border: 3px solid var(--forest); border-radius: 15px; color: var(--ink); background: #dff6ff; outline: none; box-shadow: 0 4px 0 #1f603c; }
     #game[data-mode="choice"] #decision-question { display: block; }
     #game[data-mode="choice"] .card { background: #eaf9df; }
-    #game[data-mode="choice"] .mode-picker button[aria-pressed="true"] { background: #2489a7; }
     #game[data-mode="choice"] #name-fields { border-color: #2489a7; background: #2489a7; box-shadow-color: #17687f; }
     #race-start { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; pointer-events: none; background: #163b2db8; backdrop-filter: blur(2px); }
     #race-start[hidden] { display: none; }
@@ -75,15 +70,20 @@
     .settings { display: flex; gap: 18px; margin: 14px 2px; color: #4f6b60; font-size: 13px; font-weight: 700; }
     .settings input { accent-color: var(--forest); }
     .primary { width: 100%; padding: 14px; border: 1px solid #17392f; border-radius: 4px 14px 4px 14px; color: var(--cream); background: var(--forest); box-shadow: 4px 5px 0 #df7040; font-weight: 850; transition: transform .25s ease, background .25s ease; }
-    .primary:active, .secondary:active, .mode-picker button:active { transform: scale(.97); }
+    .primary:active, .secondary:active { transform: scale(.97); }
     .feedback-carousel { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; margin: 14px 0; border-block: 1px dashed #6e5a3f88; }
     .feedback-carousel button { height: 44px; border: 0; color: var(--ink); background: transparent; font-size: 18px; }
     #result-copy { min-height: 58px; margin: 0; padding: 10px 8px; display: grid; place-items: center; color: #4f6b60; text-align: center; line-height: 1.4; }
+    .result-character { display: grid; grid-template-columns: 112px 1fr; align-items: center; gap: 12px; margin: 14px 0; }
+    #result-character-image { width: 112px; height: 112px; object-fit: contain; }
+    #result-speech { position: relative; margin: 0; padding: 16px 14px; border: 3px solid var(--ink); border-radius: 16px; background: #fff; box-shadow: 4px 4px 0 var(--ink); font-size: 18px; line-height: 1.35; white-space: pre-line; }
+    #result-speech::before { position: absolute; top: 43px; left: -12px; width: 18px; height: 18px; border-bottom: 3px solid var(--ink); border-left: 3px solid var(--ink); background: #fff; content: ""; transform: rotate(45deg); }
     #result-list { margin: 14px 0 18px; padding: 0; list-style: none; display: grid; }
     #result-list li { margin-top: -1px; padding: 11px 13px; border: 1px solid #6e5a3f55; background: #fff8df; font-family: Georgia, "Noto Serif KR", serif; font-weight: 700; box-shadow: 2px 3px 0 #d8c59a; }
     #result-list li:nth-child(even) { transform: rotate(.4deg); }
     #result-list li:first-child { position: relative; z-index: 2; color: var(--cream); background: var(--carrot); transform: rotate(-.5deg); }
-    .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+    .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .actions button { width: 100%; }
     :root { --ink: #202020; --forest: #16804c; --cream: #fffceb; --paper: #ffe66a; --carrot: #ff5b45; --sun: #ffd83d; }
     html, body { background: #ffdf43; }
     body { font-family: "Jua", "Arial Rounded MT Bold", Pretendard, system-ui, sans-serif; background-color: #ffdf43; background-image: linear-gradient(90deg, #ffffff55 50%, transparent 50%), linear-gradient(#ffffff55 50%, transparent 50%); background-size: 28px 28px; }
@@ -107,10 +107,7 @@
     .hero-title, .card h2 { font-family: inherit; line-height: 1.05; letter-spacing: 0; text-decoration: none; }
     .hero-title img { border: 3px solid var(--ink); border-radius: 4px; background: #67ddeb; filter: saturate(1.2); transform: rotate(5deg); }
     .turtle-mark { opacity: .32; }
-    .mode-picker button, .secondary { border: 3px solid var(--ink); border-radius: 7px; background: var(--paper); box-shadow: 3px 3px 0 var(--ink); }
-    .mode-picker button:first-child { transform: rotate(-1deg); }
-    .mode-picker button:last-child { transform: rotate(1deg); }
-    .mode-picker button[aria-pressed="true"] { color: var(--cream); background: #1671d9; }
+    .secondary { border: 3px solid var(--ink); border-radius: 7px; background: var(--paper); box-shadow: 3px 3px 0 var(--ink); }
     #name-fields { gap: 3px; border: 3px solid var(--ink); border-radius: 7px; background: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
     #name-fields input { background: var(--cream); }
     .settings { color: var(--ink); }
@@ -126,44 +123,44 @@
   </style>
 </head>
 <body>
-  <main id="game" aria-label="찰싹 레이스 게임">
-    <div id="hud"><span>토끼와 거북이의 찰싹 레이스</span><span id="status">준비</span><span id="race-timer">00:00.00</span></div>
-    <button id="guide" type="button">캐릭터를 드래그해 배치한 뒤 시작</button>
-    <div id="race-start" aria-live="assertive" hidden><div class="start-board"><div class="signal-lights" aria-hidden="true"><i></i><i></i><i></i></div><div id="start-count">3</div><div id="start-caption">출발 준비</div></div></div>
-    <div id="error">게임을 불러오지 못했어요.<br />화면을 새로고침해 주세요.</div>
+  <main id="game" data-mode="choice" aria-label="찰싹 결정 선택 도우미">
+    <div id="hud"><span>찰싹 결정</span><span id="status">준비</span><span id="race-timer">00:00.00</span></div>
+    <button id="guide" type="button">선택 결과 확인하기</button>
+    <div id="race-start" aria-live="assertive" hidden><div class="start-board"><div class="signal-lights" aria-hidden="true"><i></i><i></i><i></i></div><div id="start-count">3</div><div id="start-caption">선택 준비</div></div></div>
+    <div id="error">서비스를 불러오지 못했어요.<br />화면을 새로고침해 주세요.</div>
     <section id="setup" class="overlay" aria-labelledby="setup-title">
       <form id="setup-form" class="setup-page">
-        <div class="story-marquee" aria-hidden="true"><div class="story-marquee-track"><span>천천히 가도 먼저 닿으면 우승</span><span>서두르지 않아도 레이스는 계속된다</span><span>천천히 가도 먼저 닿으면 우승</span><span>서두르지 않아도 레이스는 계속된다</span></div></div>
+        <div class="story-marquee" aria-hidden="true"><div class="story-marquee-track"><span>고민될 땐 하나만 찰싹</span><span>선택이 필요할 때 가볍게 결정</span><span>고민될 땐 하나만 찰싹</span><span>선택이 필요할 때 가볍게 결정</span></div></div>
         <div class="turtle-mark" aria-hidden="true"></div>
-        <h1 id="setup-title" class="hero-title"><span>느려도 괜찮아</span><span>먼저 닿으면 우승 <img src="./assets/characters/rabbit.png" alt="" /></span></h1>
-        <p id="setup-description">이름을 적고 벽에 붙여주세요. 이번 이야기의 결말은 중력이 정합니다.</p>
-        <div class="mode-picker" aria-label="게임 모드">
-          <button type="button" data-mode="friends" aria-pressed="true">친구 내기</button>
-          <button type="button" data-mode="choice" aria-pressed="false">혼자 결정</button>
-        </div>
-        <input id="decision-question" maxlength="30" placeholder="무엇을 결정할까요?" aria-label="결정할 질문" />
+        <h1 id="setup-title" class="hero-title"><span>고민은 가볍게</span><span>하나는 찰싹 선택 <img src="./assets/characters/rabbit.png" alt="" /></span></h1>
+        <p id="setup-description">고민되는 선택지를 적어주세요. 느린 중력이 결말을 정합니다.</p>
+        <input id="decision-question" maxlength="30" placeholder="무엇을 결정할까요?" aria-label="결정할 질문" required />
         <div id="name-fields">
-          <div class="participant"><input name="name" maxlength="10" placeholder="첫 번째 이름" aria-label="첫 번째 참가자" required /><select name="character" aria-label="첫 번째 캐릭터"></select><div class="mini-character-picker" aria-label="첫 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>곰</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="두 번째 이름" aria-label="두 번째 참가자" required /><select name="character" aria-label="두 번째 캐릭터"></select><div class="mini-character-picker" aria-label="두 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>토끼</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="세 번째 이름 (선택)" aria-label="세 번째 참가자" /><select name="character" aria-label="세 번째 캐릭터"></select><div class="mini-character-picker" aria-label="세 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>고양이</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
-          <div class="participant"><input name="name" maxlength="10" placeholder="네 번째 이름 (선택)" aria-label="네 번째 참가자" /><select name="character" aria-label="네 번째 캐릭터"></select><div class="mini-character-picker" aria-label="네 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>오리</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="1번째 선택지" aria-label="1번째 선택지" required /><select name="character" aria-label="첫 번째 캐릭터"></select><div class="mini-character-picker" aria-label="첫 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>곰</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="2번째 선택지" aria-label="2번째 선택지" required /><select name="character" aria-label="두 번째 캐릭터"></select><div class="mini-character-picker" aria-label="두 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>토끼</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="3번째 선택지 (선택)" aria-label="3번째 선택지" /><select name="character" aria-label="세 번째 캐릭터"></select><div class="mini-character-picker" aria-label="세 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>고양이</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
+          <div class="participant"><input name="name" maxlength="10" placeholder="4번째 선택지 (선택)" aria-label="4번째 선택지" /><select name="character" aria-label="네 번째 캐릭터"></select><div class="mini-character-picker" aria-label="네 번째 캐릭터 선택"><button class="character-step" data-direction="-1" type="button" aria-label="이전 캐릭터">‹</button><div class="mini-character-preview"><img alt="" /><span>오리</span></div><button class="character-step" data-direction="1" type="button" aria-label="다음 캐릭터">›</button></div></div>
         </div>
         <div class="settings">
           <label><input id="sound-toggle" type="checkbox" checked /> 소리</label>
           <label><input id="haptic-toggle" type="checkbox" checked /> 진동</label>
         </div>
-        <button id="setup-submit" class="primary" type="submit" disabled>게임 준비 중</button>
+        <button id="setup-submit" class="primary" type="submit" disabled>결정 준비 중</button>
       </form>
     </section>
     <section id="result" class="overlay" aria-labelledby="result-title" hidden>
       <div class="card">
-        <div class="story-marquee" aria-hidden="true"><div class="story-marquee-track"><span>이번 우화의 결말</span><span>빠름보다 중요한 건 끝까지 내려가는 것</span><span>이번 우화의 결말</span><span>빠름보다 중요한 건 끝까지 내려가는 것</span></div></div>
+        <div class="story-marquee" aria-hidden="true"><div class="story-marquee-track"><span>오늘의 선택</span><span>고민 대신 하나를 골랐어요</span><span>오늘의 선택</span><span>고민 대신 하나를 골랐어요</span></div></div>
         <h2 id="result-title"></h2>
+        <div class="result-character">
+          <img id="result-character-image" alt="" />
+          <p id="result-speech" aria-live="polite"></p>
+        </div>
         <div class="feedback-carousel"><button id="comment-prev" type="button" aria-label="이전 한마디">←</button><p id="result-copy" aria-live="polite"></p><button id="comment-next" type="button" aria-label="다음 한마디">→</button></div>
         <ol id="result-list"></ol>
         <div class="actions">
-          <button id="edit-players" class="secondary" type="button">이름 변경</button>
-          <button id="replay" class="primary" type="button">한 판 더</button>
+          <button id="edit-players" class="secondary" type="button">선택지 변경</button>
+          <button id="replay" class="primary" type="button">다시 결정</button>
         </div>
       </div>
     </section>
